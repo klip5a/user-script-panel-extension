@@ -19,7 +19,7 @@
 Готовая версия расширения публикуется в разделе GitHub Releases в виде ZIP-архива.
 
 1. Откройте последний Release в репозитории.
-2. Скачайте архив `cnc1-userpanel-extension-<version>-chrome.zip`.
+2. [Скачайте архив](https://github.com/klip5a/user-script-panel-extension/releases).
 3. Распакуйте архив в отдельную папку на компьютере.
 4. В Chrome откройте `chrome://extensions` (в Edge — `edge://extensions`).
 5. Включите `Режим разработчика`.
