@@ -2,22 +2,21 @@ import { useEffect, useState } from "preact/hooks";
 import {
   DEFAULT_EXTENSION_SETTINGS,
   ENHANCEMENT_SETTINGS,
-  RUNTIME_SETTINGS,
   STYLE_SETTINGS,
   type BooleanSettingKey,
   type ExtensionSettings,
-  type SettingItem
+  type SettingItem,
 } from "../../src/settings/extensionSettings";
 import {
   getExtensionSettings,
   setExtensionSetting,
-  subscribeToExtensionSettings
+  subscribeToExtensionSettings,
 } from "../../src/settings/storage";
 
 function ToggleRow({
   item,
   checked,
-  onChange
+  onChange,
 }: {
   item: SettingItem;
   checked: boolean;
@@ -44,7 +43,7 @@ function SettingsSection({
   description,
   items,
   settings,
-  onToggle
+  onToggle,
 }: {
   title: string;
   description: string;
@@ -107,14 +106,6 @@ export function SidePanel() {
         title="Стили"
         description="Скрытие виджетов и элементов, которые мешают администрированию."
         items={STYLE_SETTINGS}
-        settings={settings}
-        onToggle={updateBooleanSetting}
-      />
-
-      <SettingsSection
-        title="Запуск"
-        description="Ограничения для снижения нагрузки на публичных страницах."
-        items={RUNTIME_SETTINGS}
         settings={settings}
         onToggle={updateBooleanSetting}
       />

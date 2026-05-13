@@ -38,16 +38,16 @@ pnpm run dev
 2. В Chrome откройте `chrome://extensions` (в Edge — `edge://extensions`).
 3. Включите `Режим разработчика`.
 4. Нажмите `Загрузить распакованное расширение`.
-5. Выберите папку `.output/chrome-mv3-dev`.
+5. Выберите папку `.output/cnc1-admin-extension/chrome-mv3-dev`.
 
 #### Firefox
 
 1. Запустите `pnpm run dev:firefox`.
 2. В Firefox откройте `about:debugging#/runtime/this-firefox`.
 3. Нажмите `Загрузить временное дополнение`.
-4. Выберите файл `manifest.json` из папки `.output/firefox-mv3-dev`.
+4. Выберите файл `manifest.json` из папки `.output/cnc1-admin-extension/firefox-mv3-dev`.
 
-- После этого при изменениях в коде WXT пересобирает расширение в `.output/<browser>-mv3-dev`.
+- После этого при изменениях в коде WXT пересобирает расширение в `.output/cnc1-admin-extension/<browser>-mv3-dev`.
 - Обновляйте расширение вручную на странице расширений или используйте кнопку `Обновить`.
 - Если нужна авторизация на `https://cnc1.ru`, откройте сайт в том же профиле браузера до запуска.
 

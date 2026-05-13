@@ -10,13 +10,13 @@ export default defineConfig({
     permissions: ["storage", "activeTab", "scripting", "sidePanel"],
     host_permissions: ["https://cnc1.ru/*", "https://www.cnc1.ru/*"],
     action: {
-      default_title: "CNC1 UserPanel",
-      default_popup: "popup.html"
+      default_title: "CNC1 UserPanel"
     },
     side_panel: {
       default_path: "sidepanel.html"
     }
   },
+  outDir: ".output/cnc1-admin-extension",
   vite: () => ({
     plugins: [preact(), tailwindcss()]
   })

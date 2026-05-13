@@ -4,6 +4,8 @@
 export interface ParsedValue {
   /** Тип значения */
   type: "number" | "string";
+  /** Тип числового значения для приоритетной сортировки */
+  subtype: "default" | "square" | "diameter";
   /** Числовое значение (для чисел и диапазонов) */
   numValue: number;
   /** Строковое значение (для строк) */
@@ -27,6 +29,7 @@ function normalizeNumberString(numStr: string): string {
  * Паттерн для чисел с десятичной частью (точка или запятая)
  * Поддерживает: "4", "4.05", "4,05", "0.3", ".5", ",5"
  */
+const SQUARE_SECTION_PATTERN = /^(\d*[.,]?\d+)\s*[x×хХ]\s*(\d*[.,]?\d+)/;
 const NUMBER_PATTERN = /^(\d*[.,]?\d+)$/;
 
 /**
@@ -34,6 +37,7 @@ const NUMBER_PATTERN = /^(\d*[.,]?\d+)$/;
  *
  * Поддерживает:
  * - Диапазоны: "0.01 - 5", "10-20", "4,05 - 5,5" → берётся начальное число
+ * - Квадратные сечения: "30x30", "30 × 30", "30х30 мм" → число стороны
  * - Диаметры: "Ø50", "D50", "d 50", "Ø4,5" → число после символа
  * - Чистые числа: "300", "4.05", "4,05", "0.3", ".5" → прямое значение
  * - Числа с единицей: "300 мм", "4,5 кг" → число в начале
@@ -49,6 +53,7 @@ export function parseValue(value: string): ParsedValue {
     const numValue = parseFloat(numStr);
     return {
       type: "number",
+      subtype: "default",
       numValue,
       strValue: trimmed,
       original: value,
@@ -56,13 +61,33 @@ export function parseValue(value: string): ParsedValue {
     };
   }
 
-  // 2. Диаметр "Ø50", "D50", "d 50", "Ø4,5"
+  // 2. Квадратное сечение "30x30", "30 × 30", "30х30 мм"
+  const squareMatch = trimmed.match(SQUARE_SECTION_PATTERN);
+  if (squareMatch) {
+    const firstStr = normalizeNumberString(squareMatch[1]);
+    const secondStr = normalizeNumberString(squareMatch[2]);
+    const firstValue = parseFloat(firstStr);
+    const secondValue = parseFloat(secondStr);
+    if (!isNaN(firstValue) && !isNaN(secondValue) && firstValue === secondValue) {
+      return {
+        type: "number",
+        subtype: "square",
+        numValue: firstValue,
+        strValue: trimmed,
+        original: value,
+        isFractional: !Number.isInteger(firstValue),
+      };
+    }
+  }
+
+  // 3. Диаметр "Ø50", "D50", "d 50", "Ø4,5"
   const diameterMatch = trimmed.match(/^[ØDd]\s*(\d*[.,]?\d+)/);
   if (diameterMatch) {
     const numStr = normalizeNumberString(diameterMatch[1]);
     const numValue = parseFloat(numStr);
     return {
       type: "number",
+      subtype: "diameter",
       numValue,
       strValue: trimmed,
       original: value,
@@ -76,6 +101,7 @@ export function parseValue(value: string): ParsedValue {
     const numValue = parseFloat(numStr);
     return {
       type: "number",
+      subtype: "default",
       numValue,
       strValue: trimmed,
       original: value,
@@ -92,6 +118,7 @@ export function parseValue(value: string): ParsedValue {
     if (!isNaN(parsedNum)) {
       return {
         type: "number",
+        subtype: "default",
         numValue: parsedNum,
         strValue: trimmed,
         original: value,
@@ -103,6 +130,7 @@ export function parseValue(value: string): ParsedValue {
   // 5. Строковое значение
   return {
     type: "string",
+    subtype: "default",
     numValue: 0,
     strValue: trimmed.toLowerCase(),
     original: value,
@@ -115,7 +143,8 @@ export function parseValue(value: string): ParsedValue {
  *
  * Правила:
  * - Числа всегда идут раньше строк
- * - Числа сравниваются численно
+ * - Сначала идут обычные числовые значения, затем квадратные сечения, и только потом диаметры
+ * - Числа сравниваются численно внутри своей категории
  * - Строки сравниваются лексикографически (ru locale)
  */
 export function compareParsed(a: ParsedValue, b: ParsedValue): number {
@@ -123,8 +152,20 @@ export function compareParsed(a: ParsedValue, b: ParsedValue): number {
   if (a.type === "number" && b.type === "string") return -1;
   if (a.type === "string" && b.type === "number") return 1;
 
-  // Оба числа — сравниваем численно
+  // Оба числа — сравниваем с учётом приоритета категории
   if (a.type === "number" && b.type === "number") {
+    const subtypeOrder: Record<ParsedValue["subtype"], number> = {
+      default: 0,
+      square: 1,
+      diameter: 2,
+    };
+
+    const aOrder = subtypeOrder[a.subtype];
+    const bOrder = subtypeOrder[b.subtype];
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+
     return a.numValue - b.numValue;
   }
 
@@ -160,12 +201,27 @@ export function determineSortMultiplier(values: ParsedValue[]): number {
  * formatSortValueFromNumber(100, 1)     // "000100"
  * formatSortValueFromNumber(500, 1)     // "000500"
  * formatSortValueFromNumber(1000, 1)    // "001000"
+ *
+ * // С категорией при 6-значном шаблоне:
+ * formatSortValueFromNumber(8, 1, 6, "default")  // "000008"
+ * formatSortValueFromNumber(8, 1, 6, "square")   // "100008"
+ * formatSortValueFromNumber(8, 1, 6, "diameter") // "200008"
  */
+const SORT_SUBTYPE_OFFSET: Record<ParsedValue["subtype"], number> = {
+  default: 0,
+  square: 1,
+  diameter: 2,
+};
+
 export function formatSortValueFromNumber(
   numValue: number,
   multiplier: number,
   padLength: number = 6,
+  subtype: ParsedValue["subtype"] = "default",
 ): string {
   const sortNumber = Math.round(numValue * multiplier);
-  return String(sortNumber).padStart(padLength, "0");
+  const categoryOffset = SORT_SUBTYPE_OFFSET[subtype] ?? SORT_SUBTYPE_OFFSET.default;
+  const groupBase = Math.pow(10, Math.max(padLength - 1, 1));
+  const fullSortValue = categoryOffset * groupBase + sortNumber;
+  return String(fullSortValue).padStart(padLength, "0");
 }

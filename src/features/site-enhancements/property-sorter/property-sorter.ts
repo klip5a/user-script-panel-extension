@@ -175,13 +175,14 @@ class PropertySorter {
     const multiplier = determineSortMultiplier(allParsed);
 
     // Записываем новые значения SORT
-    // SORT = значение * multiplier (100 для дробных, 1 для целых)
+    // SORT = категория + значение * multiplier (категория 0=квадрат, 1=обычное, 2=диаметр)
     dataRows.forEach((item) => {
       if (item.sortInput && item.parsed.type === "number") {
         const newSort = formatSortValueFromNumber(
           item.parsed.numValue,
           multiplier,
           this.PAD_LENGTH,
+          item.parsed.subtype,
         );
         item.sortInput.value = newSort;
         this.highlightInput(item.sortInput);
