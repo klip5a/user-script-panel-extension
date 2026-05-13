@@ -1,4 +1,9 @@
-import { getDocument } from "../../../shared";
+import {
+  cancelIdleTask,
+  getDocument,
+  type IdleDeadlineLike,
+  scheduleIdleTask,
+} from "../../../shared";
 import {
   parseValue,
   compareParsed,
@@ -20,9 +25,13 @@ interface ViolationInfo {
 
 class FilterSortCheck {
   private enabled: boolean = false;
+  private scheduledScanId: number | null = null;
+  private scheduledBatchId: number | null = null;
+  private pendingFilterBoxes: HTMLElement[] = [];
 
   // Кэш результатов проверки по property_id
   private checkCache: Map<string, PropertyCheckResult> = new Map();
+  private readonly FILTER_BATCH_SIZE = 12;
 
   start() {
     if (this.enabled) return;
@@ -41,11 +50,11 @@ class FilterSortCheck {
     // Если DOM уже загружен
     if (doc.readyState === "complete" || doc.readyState === "interactive") {
       // Небольшая задержка для уверенности что всё отрисовалось
-      setTimeout(() => this.scanFilterBoxes(), 100);
+      this.scheduleScanFilterBoxes();
     } else {
       // Ждём DOMContentLoaded
       doc.addEventListener("DOMContentLoaded", () => {
-        setTimeout(() => this.scanFilterBoxes(), 100);
+        this.scheduleScanFilterBoxes();
       });
     }
   }
@@ -54,8 +63,19 @@ class FilterSortCheck {
     if (!this.enabled) return;
     this.enabled = false;
 
+    this.cancelScheduledWork();
+    this.pendingFilterBoxes = [];
     this.cleanup();
     this.checkCache.clear();
+  }
+
+  private scheduleScanFilterBoxes() {
+    if (!this.enabled || this.scheduledScanId !== null) return;
+
+    this.scheduledScanId = scheduleIdleTask(() => {
+      this.scheduledScanId = null;
+      this.scanFilterBoxes();
+    });
   }
 
   private scanFilterBoxes() {
@@ -64,20 +84,60 @@ class FilterSortCheck {
     const doc = getDocument();
     if (!doc) return;
 
-    const filterBoxes = doc.querySelectorAll<HTMLElement>(".bx_filter_parameters_box");
+    this.pendingFilterBoxes = Array.from(doc.querySelectorAll<HTMLElement>(".bx_filter_parameters_box"));
+    this.scheduleFilterBatch();
+  }
 
-    filterBoxes.forEach((box: HTMLElement) => {
+  private scheduleFilterBatch() {
+    if (!this.enabled || this.scheduledBatchId !== null || this.pendingFilterBoxes.length === 0) {
+      return;
+    }
+
+    this.scheduledBatchId = scheduleIdleTask((deadline) => {
+      this.scheduledBatchId = null;
+      this.processFilterBatch(deadline);
+    });
+  }
+
+  private processFilterBatch(deadline: IdleDeadlineLike) {
+    let processedCount = 0;
+
+    while (
+      this.enabled &&
+      this.pendingFilterBoxes.length > 0 &&
+      processedCount < this.FILTER_BATCH_SIZE &&
+      (deadline.didTimeout || deadline.timeRemaining() > 4)
+    ) {
+      const box = this.pendingFilterBoxes.shift();
+      if (!box) continue;
+
       const propertyId = box.getAttribute("data-property_id");
-      if (!propertyId) return;
+      if (!propertyId) continue;
 
       // Пропускаем уже проверенные
       if (this.checkCache.has(propertyId)) {
         this.applyCachedResult(box, propertyId);
-        return;
+        processedCount += 1;
+        continue;
       }
 
       this.checkFilterBox(box);
-    });
+      processedCount += 1;
+    }
+
+    this.scheduleFilterBatch();
+  }
+
+  private cancelScheduledWork() {
+    if (this.scheduledScanId !== null) {
+      cancelIdleTask(this.scheduledScanId);
+      this.scheduledScanId = null;
+    }
+
+    if (this.scheduledBatchId !== null) {
+      cancelIdleTask(this.scheduledBatchId);
+      this.scheduledBatchId = null;
+    }
   }
 
   private checkFilterBox(box: HTMLElement) {

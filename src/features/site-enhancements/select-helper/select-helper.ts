@@ -3,6 +3,8 @@ import {
   type SelectOption,
   type SelectScanOptions,
   DEFAULT_SELECT_PATTERN,
+  cancelIdleTask,
+  scheduleIdleTask,
 } from "../../../shared";
 
 /** Расширение HTMLSelectElement для хранения оригинальных опций */
@@ -135,6 +137,7 @@ export class SelectHelper {
   private stylesInjected = false;
   private observer: MutationObserver | null = null;
   private scanOptions: SelectScanOptions | undefined;
+  private scheduledInjectId: number | null = null;
 
   /**
    * Сканирует страницу и возвращает список найденных select'ов
@@ -326,6 +329,13 @@ export class SelectHelper {
     this.injectStyles();
     this.removeButtons(); // Сначала убираем старые
 
+    this.scheduledInjectId = scheduleIdleTask(() => {
+      this.scheduledInjectId = null;
+      this.performInjectButtons(options);
+    });
+  }
+
+  private performInjectButtons(options?: SelectScanOptions): void {
     const selects = this.scan(options);
 
     selects.forEach((info) => {
@@ -387,6 +397,11 @@ export class SelectHelper {
    * Удаляет все инъецированные кнопки
    */
   removeButtons(): void {
+    if (this.scheduledInjectId !== null) {
+      cancelIdleTask(this.scheduledInjectId);
+      this.scheduledInjectId = null;
+    }
+
     this.closePopup();
     this.stopObserver(); // Останавливаем наблюдение
 

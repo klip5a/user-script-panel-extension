@@ -1,16 +1,32 @@
-import { debounce } from "../../../shared";
+import {
+  cancelIdleTask,
+  debounce,
+  type IdleDeadlineLike,
+  scheduleIdleTask,
+} from "../../../shared";
+
+type RowEnhancement = {
+  row: HTMLElement;
+  sortValue: number;
+  isDuplicate: boolean;
+};
 
 class SortHighlight {
   private enabled: boolean = false;
   private observer: MutationObserver | null = null;
+  private scheduledProcessId: number | null = null;
+  private scheduledBatchId: number | null = null;
+  private pendingEnhancements: RowEnhancement[] = [];
 
   private sortMap: Map<number, HTMLElement[]> = new Map();
 
   private readonly SORT_THRESHOLD = 5000;
+  private readonly ROW_BATCH_SIZE = 30;
+  private readonly SORT_ATTRIBUTE_NAMES = ["data-sort", "data-seo-sort", "data-seo_sort"];
   private debouncedProcessAllRows: () => void;
 
   constructor() {
-    this.debouncedProcessAllRows = debounce(this.processAllRows.bind(this), 350);
+    this.debouncedProcessAllRows = debounce(this.scheduleProcessAllRows.bind(this), 350);
   }
 
   private getDocument(): Document | null {
@@ -40,13 +56,15 @@ class SortHighlight {
 
     this.initObservers();
 
-    setTimeout(() => this.processAllRows(), 200);
+    this.scheduleProcessAllRows();
   }
 
   stop() {
     if (!this.enabled) return;
     this.enabled = false;
     this.observer?.disconnect();
+    this.cancelScheduledWork();
+    this.pendingEnhancements = [];
     this.cleanup();
     this.sortMap.clear();
   }
@@ -69,11 +87,12 @@ class SortHighlight {
     const doc = this.getDocument();
     if (!doc) return;
 
-    const rows = doc.querySelectorAll<HTMLElement>(".table-view__item.item[data-sort]");
+    const rows = doc.querySelectorAll<HTMLElement>(".table-view__item.item");
     this.sortMap.clear();
 
     rows.forEach((row) => {
-      const sortValue = parseInt(row.getAttribute("data-sort") || "0", 10);
+      const sortValue = this.getSortValue(row);
+      if (sortValue === null) return;
 
       if (!this.sortMap.has(sortValue)) {
         this.sortMap.set(sortValue, []);
@@ -81,13 +100,81 @@ class SortHighlight {
       this.sortMap.get(sortValue)!.push(row);
     });
 
+    this.pendingEnhancements = [];
+
     this.sortMap.forEach((elements, sortValue) => {
       const isDuplicate = elements.length > 1;
 
       elements.forEach((row) => {
-        this.enhanceRow(row, sortValue, isDuplicate);
+        this.pendingEnhancements.push({ row, sortValue, isDuplicate });
       });
     });
+
+    this.scheduleEnhanceBatch();
+  }
+
+  private scheduleProcessAllRows() {
+    if (!this.enabled || this.scheduledProcessId !== null) return;
+
+    this.scheduledProcessId = scheduleIdleTask(() => {
+      this.scheduledProcessId = null;
+      this.processAllRows();
+    });
+  }
+
+  private scheduleEnhanceBatch() {
+    if (!this.enabled || this.scheduledBatchId !== null || this.pendingEnhancements.length === 0) {
+      return;
+    }
+
+    this.scheduledBatchId = scheduleIdleTask((deadline) => {
+      this.scheduledBatchId = null;
+      this.processEnhanceBatch(deadline);
+    });
+  }
+
+  private processEnhanceBatch(deadline: IdleDeadlineLike) {
+    let processedCount = 0;
+
+    while (
+      this.enabled &&
+      this.pendingEnhancements.length > 0 &&
+      processedCount < this.ROW_BATCH_SIZE &&
+      (deadline.didTimeout || deadline.timeRemaining() > 4)
+    ) {
+      const item = this.pendingEnhancements.shift();
+      if (!item) continue;
+      this.enhanceRow(item.row, item.sortValue, item.isDuplicate);
+      processedCount += 1;
+    }
+
+    this.scheduleEnhanceBatch();
+  }
+
+  private cancelScheduledWork() {
+    if (this.scheduledProcessId !== null) {
+      cancelIdleTask(this.scheduledProcessId);
+      this.scheduledProcessId = null;
+    }
+
+    if (this.scheduledBatchId !== null) {
+      cancelIdleTask(this.scheduledBatchId);
+      this.scheduledBatchId = null;
+    }
+  }
+
+  private getSortValue(row: HTMLElement): number | null {
+    for (const attributeName of this.SORT_ATTRIBUTE_NAMES) {
+      const value = row.getAttribute(attributeName);
+      if (!value) continue;
+
+      const sortValue = Number.parseInt(value, 10);
+      if (Number.isFinite(sortValue)) {
+        return sortValue;
+      }
+    }
+
+    return null;
   }
 
   private enhanceRow(row: HTMLElement, sortValue: number, isDuplicate: boolean) {
