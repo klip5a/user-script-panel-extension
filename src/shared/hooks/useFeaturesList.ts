@@ -1,6 +1,7 @@
 import type { FeatureToggleItem } from "../types";
 import { useStoredFlag } from "./useStoredFlag";
 
+// Legacy-список фич для старого popup UI. Side panel сейчас использует chrome.storage настройки.
 export function useFeaturesList() {
   const [disableSocialWidget, setDisableSocialWidget] = useStoredFlag(
     "userScriptPanel.widgets.social.disabled",

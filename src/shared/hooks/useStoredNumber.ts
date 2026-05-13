@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 
+// Локальный хук для числовых UI-настроек с безопасным fallback на initial.
 export function useStoredNumber(key: string, initial: number) {
   const [value, setValue] = useState<number>(() => {
     try {
@@ -15,7 +16,7 @@ export function useStoredNumber(key: string, initial: number) {
     try {
       localStorage.setItem(key, String(value));
     } catch {
-      // ignore
+      // Ошибка записи не должна ломать интерфейс панели.
     }
   }, [key, value]);
 

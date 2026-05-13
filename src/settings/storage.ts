@@ -4,6 +4,7 @@ import {
   type ExtensionSettings
 } from "./extensionSettings";
 
+// Храним настройки в chrome.storage.local, чтобы они были доступны и панели, и content script.
 export async function getExtensionSettings(): Promise<ExtensionSettings> {
   const stored = await chrome.storage.local.get(DEFAULT_EXTENSION_SETTINGS);
   return {
@@ -22,12 +23,14 @@ export async function setExtensionSetting<K extends ExtensionSettingKey>(
 export function subscribeToExtensionSettings(
   callback: (settings: ExtensionSettings) => void
 ): () => void {
+  // Chrome присылает изменения по ключам; пересобираем весь объект настроек для единого API.
   const listener = (
     changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
     areaName: string
   ) => {
     if (areaName !== "local") return;
 
+    // Игнорируем чужие ключи storage.local, чтобы не дергать DOM-улучшения без причины.
     const hasSettingsChange = Object.keys(DEFAULT_EXTENSION_SETTINGS).some((key) => key in changes);
     if (!hasSettingsChange) return;
 

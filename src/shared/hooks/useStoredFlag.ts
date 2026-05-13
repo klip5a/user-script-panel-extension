@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 
+// Локальный хук для старых UI-настроек: хранит boolean как "1"/"0" в localStorage.
 export function useStoredFlag(key: string, initial: boolean) {
   const [val, setVal] = useState<boolean>(() => {
     try {
@@ -14,7 +15,7 @@ export function useStoredFlag(key: string, initial: boolean) {
     try {
       localStorage.setItem(key, val ? "1" : "0");
     } catch {
-      // ignore
+      // localStorage может быть недоступен в приватном режиме или при ограничениях браузера.
     }
   }, [key, val]);
 

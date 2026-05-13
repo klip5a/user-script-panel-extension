@@ -3,6 +3,7 @@ export type ExtensionSettingKey =
   | "selectHelperEnabled"
   | "propertySorterEnabled"
   | "filterSortCheckEnabled"
+  | "imageInfoHighlightEnabled"
   | "hideSocialWidget"
   | "hideBitrixWidgets"
   | "hideCallbackButtons"
@@ -14,6 +15,7 @@ export type ExtensionSettings = {
   selectHelperEnabled: boolean;
   propertySorterEnabled: boolean;
   filterSortCheckEnabled: boolean;
+  imageInfoHighlightEnabled: boolean;
   hideSocialWidget: boolean;
   hideBitrixWidgets: boolean;
   hideCallbackButtons: boolean;
@@ -36,6 +38,7 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   selectHelperEnabled: false,
   propertySorterEnabled: false,
   filterSortCheckEnabled: false,
+  imageInfoHighlightEnabled: false,
   hideSocialWidget: false,
   hideBitrixWidgets: false,
   hideCallbackButtons: false,
@@ -63,6 +66,11 @@ export const ENHANCEMENT_SETTINGS: SettingItem[] = [
     key: "filterSortCheckEnabled",
     title: "Проверка сортировки фильтра",
     description: "Подсвечивает числовые значения фильтра не по порядку."
+  },
+  {
+    key: "imageInfoHighlightEnabled",
+    title: "Информация о картинках",
+    description: "Показывает размер полного изображения в каталоге и карточке товара, вес файла догружает при наведении."
   }
 ];
 

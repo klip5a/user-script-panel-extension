@@ -1,5 +1,6 @@
 import { useEffect } from "preact/hooks";
 
+// Управляет одиночным style-тегом: добавляет CSS при enabled и удаляет при выключении.
 export function useInjectedStyle(id: string, css: string, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) {

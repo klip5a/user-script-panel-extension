@@ -1,6 +1,13 @@
-import { filterSortCheck, propertySorter, selectHelper, sortHighlight } from "../features";
+import {
+  filterSortCheck,
+  imageInfoHighlight,
+  propertySorter,
+  selectHelper,
+  sortHighlight,
+} from "../features";
 import type { ExtensionSettings } from "../settings/extensionSettings";
 
+// CSS-правки держим рядом с runtime-логикой, потому что они включаются настройками без React UI.
 const HIDE_SOCIAL_WIDGET_CSS = `
   .cback, .cback .mes, .cback .open_form {
     opacity: 0 !important;
@@ -32,6 +39,11 @@ function isBitrixAdminPage(): boolean {
   return document.body.id === "bx-admin-prefix" || location.pathname.startsWith("/bitrix/admin/");
 }
 
+function isCatalogPage(): boolean {
+  return location.pathname.startsWith("/catalog/");
+}
+
+// Один и тот же style-тег переиспользуется при переключении настройки, чтобы не плодить дубли.
 function setInjectedStyle(id: string, css: string, enabled: boolean) {
   const existing = document.getElementById(id);
 
@@ -50,9 +62,11 @@ function setInjectedStyle(id: string, css: string, enabled: boolean) {
 }
 
 export function applyContentSettings(settings: ExtensionSettings) {
+  // Большинство DOM-инструментов рассчитаны на админку; каталог разрешен только для визуальных подсветок.
   const canRunEnhancements = !settings.runOnlyInAdmin || isBitrixAdminPage();
+  const canRunSortHighlight = canRunEnhancements || isCatalogPage();
 
-  if (canRunEnhancements && settings.sortHighlightEnabled) {
+  if (canRunSortHighlight && settings.sortHighlightEnabled) {
     sortHighlight.start();
   } else {
     sortHighlight.stop();
@@ -74,6 +88,12 @@ export function applyContentSettings(settings: ExtensionSettings) {
     filterSortCheck.start();
   } else {
     filterSortCheck.stop();
+  }
+
+  if (canRunSortHighlight && settings.imageInfoHighlightEnabled) {
+    imageInfoHighlight.start();
+  } else {
+    imageInfoHighlight.stop();
   }
 
   setInjectedStyle(
