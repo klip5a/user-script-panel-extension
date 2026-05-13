@@ -4,7 +4,8 @@ import {
   parseValue,
   compareParsed,
   determineSortMultiplier,
-  formatSortValueFromNumber,
+  determineSortFormat,
+  formatSortValue,
 } from "./utils/sort-value-parser";
 
 /**
@@ -42,9 +43,6 @@ class PropertySorter {
   private readonly ADD_BTN_ID = "propedit_add_btn";
   /** Паттерн для извлечения ID из name атрибута */
   private readonly VALUE_FIELD_PATTERN = /^PROPERTY_VALUES\[(\w+)\]\[VALUE\]$/;
-
-  /** Длина паддинга для SORT */
-  private readonly PAD_LENGTH = 6;
 
   constructor() {
     this.debouncedCheckAndInject = debounce(this.checkAndInject.bind(this), 350);
@@ -173,17 +171,13 @@ class PropertySorter {
     // Определяем множитель на основе наличия дробных чисел
     const allParsed = dataRows.map((item) => item.parsed);
     const multiplier = determineSortMultiplier(allParsed);
+    const sortFormat = determineSortFormat(allParsed, multiplier);
 
     // Записываем новые значения SORT
     // SORT = категория + значение * multiplier (категория 0=квадрат, 1=обычное, 2=диаметр)
     dataRows.forEach((item) => {
       if (item.sortInput && item.parsed.type === "number") {
-        const newSort = formatSortValueFromNumber(
-          item.parsed.numValue,
-          multiplier,
-          this.PAD_LENGTH,
-          item.parsed.subtype,
-        );
+        const newSort = formatSortValue(item.parsed, multiplier, sortFormat);
         item.sortInput.value = newSort;
         this.highlightInput(item.sortInput);
       }

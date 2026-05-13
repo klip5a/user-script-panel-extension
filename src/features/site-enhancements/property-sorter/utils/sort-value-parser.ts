@@ -8,12 +8,19 @@ export interface ParsedValue {
   subtype: "default" | "square" | "diameter";
   /** Числовое значение (для чисел и диапазонов) */
   numValue: number;
+  /** Second numeric value for A x B sections. */
+  secondaryNumValue?: number;
   /** Строковое значение (для строк) */
   strValue: string;
   /** Оригинальная строка */
   original: string;
   /** Является ли число дробным (имеет десятичную часть) */
   isFractional: boolean;
+}
+
+export interface SortFormatConfig {
+  padLength: number;
+  squareSidePadLength: number;
 }
 
 /**
@@ -29,7 +36,7 @@ function normalizeNumberString(numStr: string): string {
  * Паттерн для чисел с десятичной частью (точка или запятая)
  * Поддерживает: "4", "4.05", "4,05", "0.3", ".5", ",5"
  */
-const SQUARE_SECTION_PATTERN = /^(\d*[.,]?\d+)\s*[x×хХ]\s*(\d*[.,]?\d+)/;
+const SQUARE_SECTION_PATTERN = /^(\d*[.,]?\d+)\s*[\u0078\u0058\u00d7\u0445\u0425]\s*(\d*[.,]?\d+)/;
 const NUMBER_PATTERN = /^(\d*[.,]?\d+)$/;
 
 /**
@@ -68,14 +75,15 @@ export function parseValue(value: string): ParsedValue {
     const secondStr = normalizeNumberString(squareMatch[2]);
     const firstValue = parseFloat(firstStr);
     const secondValue = parseFloat(secondStr);
-    if (!isNaN(firstValue) && !isNaN(secondValue) && firstValue === secondValue) {
+    if (!isNaN(firstValue) && !isNaN(secondValue)) {
       return {
         type: "number",
         subtype: "square",
         numValue: firstValue,
+        secondaryNumValue: secondValue,
         strValue: trimmed,
         original: value,
-        isFractional: !Number.isInteger(firstValue),
+        isFractional: !Number.isInteger(firstValue) || !Number.isInteger(secondValue),
       };
     }
   }
@@ -166,6 +174,20 @@ export function compareParsed(a: ParsedValue, b: ParsedValue): number {
       return aOrder - bOrder;
     }
 
+    if (a.subtype === "square" && b.subtype === "square") {
+      const primaryDiff = a.numValue - b.numValue;
+      if (primaryDiff !== 0) {
+        return primaryDiff;
+      }
+
+      const secondaryDiff = (a.secondaryNumValue ?? 0) - (b.secondaryNumValue ?? 0);
+      if (secondaryDiff !== 0) {
+        return secondaryDiff;
+      }
+
+      return a.strValue.localeCompare(b.strValue, "ru");
+    }
+
     return a.numValue - b.numValue;
   }
 
@@ -213,13 +235,123 @@ const SORT_SUBTYPE_OFFSET: Record<ParsedValue["subtype"], number> = {
   diameter: 2,
 };
 
+const MIN_SORT_PAD_LENGTH = 9;
+const MIN_SQUARE_SIDE_PAD_LENGTH = 4;
+
+function getScaledSortNumber(numValue: number, multiplier: number): number {
+  return Math.round(numValue * multiplier);
+}
+
+function getDigitLength(numValue: number): number {
+  return String(Math.abs(numValue)).length;
+}
+
+export function determineSortFormat(
+  values: ParsedValue[],
+  multiplier: number,
+): SortFormatConfig {
+  let maxNumberDigits = 1;
+  let maxSquareSideDigits = MIN_SQUARE_SIDE_PAD_LENGTH;
+
+  values.forEach((value) => {
+    if (value.type !== "number") {
+      return;
+    }
+
+    const scaledPrimary = getScaledSortNumber(value.numValue, multiplier);
+    maxNumberDigits = Math.max(maxNumberDigits, getDigitLength(scaledPrimary));
+
+    if (value.subtype === "square" && value.secondaryNumValue !== undefined) {
+      const scaledSecondary = getScaledSortNumber(value.secondaryNumValue, multiplier);
+      maxSquareSideDigits = Math.max(
+        maxSquareSideDigits,
+        getDigitLength(scaledPrimary),
+        getDigitLength(scaledSecondary),
+      );
+    }
+  });
+
+  return {
+    padLength: Math.max(
+      MIN_SORT_PAD_LENGTH,
+      maxNumberDigits + 1,
+      maxSquareSideDigits * 2 + 1,
+    ),
+    squareSidePadLength: maxSquareSideDigits,
+  };
+}
+
+function normalizeSortFormatConfig(format: SortFormatConfig | number): SortFormatConfig {
+  if (typeof format !== "number") {
+    return format;
+  }
+
+  return {
+    padLength: format,
+    squareSidePadLength: Math.max(
+      MIN_SQUARE_SIDE_PAD_LENGTH,
+      Math.floor((format - 1) / 2),
+    ),
+  };
+}
+
+function canUseCompositeSquareSortValue(value: ParsedValue, multiplier: number): boolean {
+  const secondaryNumValue = value.secondaryNumValue;
+  const scaledPrimary = getScaledSortNumber(value.numValue, multiplier);
+  const scaledSecondary =
+    secondaryNumValue === undefined ? Number.NaN : getScaledSortNumber(secondaryNumValue, multiplier);
+
+  return (
+    value.subtype === "square" &&
+    secondaryNumValue !== undefined &&
+    Number.isFinite(scaledPrimary) &&
+    Number.isFinite(scaledSecondary) &&
+    scaledPrimary >= 0 &&
+    scaledSecondary >= 0
+  );
+}
+
+function formatCompositeSquareSortValue(
+  value: ParsedValue,
+  multiplier: number,
+  config: SortFormatConfig,
+): string {
+  const first = String(getScaledSortNumber(value.numValue, multiplier)).padStart(
+    config.squareSidePadLength,
+    "0",
+  );
+  const second = String(getScaledSortNumber(value.secondaryNumValue ?? 0, multiplier)).padStart(
+    config.squareSidePadLength,
+    "0",
+  );
+  return `${SORT_SUBTYPE_OFFSET.square}${first}${second}`;
+}
+
+export function formatSortValue(
+  value: ParsedValue,
+  multiplier: number,
+  format: SortFormatConfig | number = determineSortFormat([value], multiplier),
+): string {
+  if (value.type !== "number") {
+    return "";
+  }
+
+  const config = normalizeSortFormatConfig(format);
+
+  if (canUseCompositeSquareSortValue(value, multiplier)) {
+    return formatCompositeSquareSortValue(value, multiplier, config);
+  }
+
+  return formatSortValueFromNumber(value.numValue, multiplier, config.padLength, value.subtype);
+}
+
 export function formatSortValueFromNumber(
   numValue: number,
   multiplier: number,
   padLength: number = 6,
   subtype: ParsedValue["subtype"] = "default",
 ): string {
-  const sortNumber = Math.round(numValue * multiplier);
+  const sortNumber = getScaledSortNumber(numValue, multiplier);
   const categoryOffset = SORT_SUBTYPE_OFFSET[subtype] ?? SORT_SUBTYPE_OFFSET.default;
   const groupBase = Math.pow(10, Math.max(padLength - 1, 1));
   const fullSortValue = categoryOffset * groupBase + sortNumber;
