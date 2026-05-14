@@ -1,6 +1,7 @@
 import {
   filterSortCheck,
   imageInfoHighlight,
+  productArticleHighlight,
   propertySorter,
   selectHelper,
   sortHighlight,
@@ -94,6 +95,12 @@ export function applyContentSettings(settings: ExtensionSettings) {
     imageInfoHighlight.start();
   } else {
     imageInfoHighlight.stop();
+  }
+
+  if (canRunSortHighlight) {
+    productArticleHighlight.start();
+  } else {
+    productArticleHighlight.stop();
   }
 
   setInjectedStyle(
