@@ -39,6 +39,7 @@ class ImageInfoHighlight {
     ".item-wrapper img",
     ".detail-gallery-big-slider-main img",
     ".detail-gallery-big__picture",
+    ".fastview-product__image .product-detail-gallery__picture",
     ".tabDetailImg img",
     ".section_img img",
     ".section_item td.image img",
@@ -190,6 +191,8 @@ class ImageInfoHighlight {
       // Вес и неизвестные размеры догружаются только по наведению, чтобы не создавать лишний трафик.
       void this.loadOriginalImageInfo(image).then(syncBadge);
     });
+
+    void this.loadOriginalImageInfo(image).then(syncBadge);
 
     syncBadge();
   }
@@ -384,6 +387,13 @@ class ImageInfoHighlight {
         outline: 2px solid rgba(5, 150, 105, 0.55) !important;
         outline-offset: -2px !important;
         box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.55) !important;
+      }
+      .fastview-product__image .image-info-highlight-wrap {
+        display: inline-block !important;
+      }
+      .tabDetailImg a.image-info-highlight-wrap,
+      .tabDetailImg .image-info-highlight-wrap {
+        display: inline-block !important;
       }
       .image-info-highlight-badge {
         position: absolute !important;

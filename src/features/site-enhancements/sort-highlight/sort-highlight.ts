@@ -166,7 +166,7 @@ class SortHighlight {
   private getSortValue(row: HTMLElement): number | null {
     for (const attributeName of this.SORT_ATTRIBUTE_NAMES) {
       const value = row.getAttribute(attributeName);
-      if (!value) continue;
+      if (value === null) continue;
 
       const sortValue = Number.parseInt(value, 10);
       if (Number.isFinite(sortValue)) {
