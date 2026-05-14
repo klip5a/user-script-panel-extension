@@ -38,6 +38,60 @@ function normalizeNumberString(numStr: string): string {
  */
 const SQUARE_SECTION_PATTERN = /^(\d*[.,]?\d+)\s*[\u0078\u0058\u00d7\u0445\u0425]\s*(\d*[.,]?\d+)/;
 const NUMBER_PATTERN = /^(\d*[.,]?\d+)$/;
+const NATURAL_STRING_COLLATOR = new Intl.Collator("ru", {
+  numeric: true,
+  sensitivity: "base",
+});
+const COMPACT_CODE_PATTERN = /^([a-zа-я]*)(\d+(?:[.,]\d+)?)(.*)$/i;
+
+interface CompactCodeParts {
+  prefix: string;
+  number: number;
+  suffix: string;
+}
+
+function parseCompactCode(value: string): CompactCodeParts | null {
+  const match = value.trim().toLowerCase().match(COMPACT_CODE_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const number = Number.parseFloat(normalizeNumberString(match[2]));
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  return {
+    prefix: match[1],
+    number,
+    suffix: match[3].trim(),
+  };
+}
+
+export function compareNaturalTextValues(a: string, b: string): number {
+  const aCode = parseCompactCode(a);
+  const bCode = parseCompactCode(b);
+
+  if (aCode && bCode) {
+    if (aCode.prefix && bCode.prefix && aCode.prefix !== bCode.prefix) {
+      return NATURAL_STRING_COLLATOR.compare(aCode.prefix, bCode.prefix);
+    }
+
+    const numberDiff = aCode.number - bCode.number;
+    if (numberDiff !== 0) {
+      return numberDiff;
+    }
+
+    const prefixDiff = NATURAL_STRING_COLLATOR.compare(aCode.prefix, bCode.prefix);
+    if (prefixDiff !== 0) {
+      return prefixDiff;
+    }
+
+    return NATURAL_STRING_COLLATOR.compare(aCode.suffix, bCode.suffix);
+  }
+
+  return NATURAL_STRING_COLLATOR.compare(a.trim().toLowerCase(), b.trim().toLowerCase());
+}
 
 /**
  * Парсит строку значения для интеллектуальной сортировки
@@ -185,14 +239,14 @@ export function compareParsed(a: ParsedValue, b: ParsedValue): number {
         return secondaryDiff;
       }
 
-      return a.strValue.localeCompare(b.strValue, "ru");
+      return compareNaturalTextValues(a.strValue, b.strValue);
     }
 
     return a.numValue - b.numValue;
   }
 
   // Обе строки — лексикографически (ru locale)
-  return a.strValue.localeCompare(b.strValue, "ru");
+  return compareNaturalTextValues(a.strValue, b.strValue);
 }
 
 /**

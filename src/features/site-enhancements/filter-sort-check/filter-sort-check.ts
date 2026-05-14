@@ -7,14 +7,17 @@ import {
 import {
   parseValue,
   compareParsed,
+  compareNaturalTextValues,
   type ParsedValue,
 } from "../property-sorter/utils/sort-value-parser";
+
+type FilterCompareMode = "parsed" | "naturalText";
 
 interface PropertyCheckResult {
   propertyId: string;
   propertyName: string;
   isSorted: boolean;
-  hasNumericValues: boolean;
+  hasSortableValues: boolean;
   violations: ViolationInfo[];
 }
 
@@ -144,29 +147,31 @@ class FilterSortCheck {
     const propertyId = box.getAttribute("data-property_id") || "";
     const propertyName = box.getAttribute("data-property_name") || "";
 
-    const valueElements = box.querySelectorAll<HTMLElement>(".filter-value-text[title]");
+    const valueElements = box.querySelectorAll<HTMLElement>(".filter-value-text");
     if (valueElements.length < 2) return;
 
     const values: { element: HTMLElement; text: string; parsed: ParsedValue }[] = [];
 
     valueElements.forEach((el) => {
-      const text = el.getAttribute("title") || el.textContent?.trim() || "";
+      const text = this.getValueText(el);
       const parsed = parseValue(text);
       values.push({ element: el, text, parsed });
     });
 
     // Проверяем числовые значения
-    const numericValues = values.filter((v) => v.parsed.type === "number");
-    if (numericValues.length < 2) return;
+    const sortableValues = values.filter((v) => v.text.trim().length > 0);
+    if (sortableValues.length < 2) return;
+
+    const compareMode = this.getCompareMode(sortableValues);
 
     // Находим нарушения порядка - проверяем возрастание в оригинальном порядке
     const violations: ViolationInfo[] = [];
 
-    for (let i = 1; i < numericValues.length; i++) {
-      const prev = numericValues[i - 1];
-      const curr = numericValues[i];
+    for (let i = 1; i < sortableValues.length; i++) {
+      const prev = sortableValues[i - 1];
+      const curr = sortableValues[i];
       // Если текущее значение меньше предыдущего - это нарушение
-      if (compareParsed(prev.parsed, curr.parsed) > 0) {
+      if (this.compareFilterValues(prev, curr, compareMode) > 0) {
         violations.push({
           index: i,
           value: curr.text,
@@ -178,37 +183,40 @@ class FilterSortCheck {
       propertyId,
       propertyName,
       isSorted: violations.length === 0,
-      hasNumericValues: true,
+      hasSortableValues: true,
       violations,
     };
 
     this.checkCache.set(propertyId, result);
-    this.applyHighlight(box, result, numericValues);
+    this.applyHighlight(box, result, sortableValues);
   }
 
   private applyCachedResult(box: HTMLElement, propertyId: string) {
     const result = this.checkCache.get(propertyId);
-    if (!result || !result.hasNumericValues || result.isSorted) return;
+    if (!result || !result.hasSortableValues || result.isSorted) return;
 
-    const valueElements = box.querySelectorAll<HTMLElement>(".filter-value-text[title]");
-    const numericValues: { element: HTMLElement }[] = [];
+    const valueElements = box.querySelectorAll<HTMLElement>(".filter-value-text");
+    const sortableValues: { element: HTMLElement }[] = [];
 
     valueElements.forEach((el) => {
-      const text = el.getAttribute("title") || el.textContent?.trim() || "";
-      const parsed = parseValue(text);
-      if (parsed.type === "number") {
-        numericValues.push({ element: el });
+      const text = this.getValueText(el);
+      if (text.trim().length > 0) {
+        sortableValues.push({ element: el });
       }
     });
 
-    this.applyHighlight(box, result, numericValues);
+    this.applyHighlight(box, result, sortableValues);
   }
 
   private applyHighlight(
     box: HTMLElement,
     result: PropertyCheckResult,
-    numericValues: { element: HTMLElement }[],
+    sortableValues: { element: HTMLElement }[],
   ) {
+    box.querySelectorAll<HTMLElement>(".filter-sort-out-of-order").forEach((el) => {
+      el.classList.remove("filter-sort-out-of-order");
+    });
+
     if (result.isSorted) {
       box.classList.remove("filter-sort-warning");
       this.removeBadge(box);
@@ -220,8 +228,8 @@ class FilterSortCheck {
     // Подсвечиваем только первые 3 нарушения
     const violationsToShow = result.violations.slice(0, 3);
     violationsToShow.forEach((v) => {
-      if (numericValues[v.index]) {
-        const wrap = numericValues[v.index].element.closest(".filter-value-wrap") as HTMLElement;
+      if (sortableValues[v.index]) {
+        const wrap = sortableValues[v.index].element.closest(".filter-value-wrap") as HTMLElement;
         if (wrap) {
           wrap.classList.add("filter-sort-out-of-order");
         }
@@ -229,6 +237,28 @@ class FilterSortCheck {
     });
 
     this.addBadge(box, result);
+  }
+
+  private getValueText(element: HTMLElement): string {
+    return element.getAttribute("title") || element.textContent?.trim() || "";
+  }
+
+  private getCompareMode(values: { parsed: ParsedValue }[]): FilterCompareMode {
+    const hasNumbers = values.some((value) => value.parsed.type === "number");
+    const hasStrings = values.some((value) => value.parsed.type === "string");
+    return hasNumbers && hasStrings ? "naturalText" : "parsed";
+  }
+
+  private compareFilterValues(
+    a: { text: string; parsed: ParsedValue },
+    b: { text: string; parsed: ParsedValue },
+    mode: FilterCompareMode,
+  ): number {
+    if (mode === "naturalText") {
+      return compareNaturalTextValues(a.text, b.text);
+    }
+
+    return compareParsed(a.parsed, b.parsed);
   }
 
   private addBadge(box: HTMLElement, result: PropertyCheckResult) {
