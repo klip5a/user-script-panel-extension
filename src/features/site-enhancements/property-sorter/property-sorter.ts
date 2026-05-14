@@ -3,6 +3,7 @@ import {
   type ParsedValue,
   parseValue,
   compareParsed,
+  compareNaturalTextValues,
   determineSortMultiplier,
   determineSortFormat,
   formatSortValue,
@@ -166,21 +167,38 @@ class PropertySorter {
     }
 
     // Сортируем по value
-    dataRows.sort((a, b) => compareParsed(a.parsed, b.parsed));
+    const hasNumbers = dataRows.some((item) => item.parsed.type === "number");
+    const hasStrings = dataRows.some((item) => item.parsed.type === "string");
+    const hasMixedCodes = hasNumbers && hasStrings;
+
+    dataRows.sort((a, b) => (
+      hasMixedCodes
+        ? compareNaturalTextValues(a.valueInput.value, b.valueInput.value)
+        : compareParsed(a.parsed, b.parsed)
+    ));
 
     // Определяем множитель на основе наличия дробных чисел
     const allParsed = dataRows.map((item) => item.parsed);
     const multiplier = determineSortMultiplier(allParsed);
     const sortFormat = determineSortFormat(allParsed, multiplier);
+    const stringSortBase = Math.pow(10, sortFormat.padLength);
+    let stringSortIndex = 0;
 
     // Записываем новые значения SORT
     // SORT = категория + значение * multiplier (категория 0=квадрат, 1=обычное, 2=диаметр)
     dataRows.forEach((item) => {
-      if (item.sortInput && item.parsed.type === "number") {
-        const newSort = formatSortValue(item.parsed, multiplier, sortFormat);
-        item.sortInput.value = newSort;
-        this.highlightInput(item.sortInput);
+      if (!item.sortInput) {
+        return;
       }
+
+      const newSort = hasMixedCodes
+        ? String(stringSortIndex++).padStart(sortFormat.padLength, "0")
+        : item.parsed.type === "number"
+          ? formatSortValue(item.parsed, multiplier, sortFormat)
+          : String(stringSortBase + stringSortIndex++).padStart(sortFormat.padLength + 1, "0");
+
+      item.sortInput.value = newSort;
+      this.highlightInput(item.sortInput);
     });
 
     const multiplierText = multiplier === 100 ? " (×100)" : "";
