@@ -62,7 +62,30 @@ function setInjectedStyle(id: string, css: string, enabled: boolean) {
   }
 }
 
-export function applyContentSettings(settings: ExtensionSettings) {
+export function applyCriticalSettings(settings: ExtensionSettings) {
+  setInjectedStyle(
+    "cnc1-userpanel-hide-social-widget",
+    HIDE_SOCIAL_WIDGET_CSS,
+    settings.hideSocialWidget
+  );
+  setInjectedStyle(
+    "cnc1-userpanel-hide-bitrix-widgets",
+    HIDE_BITRIX_WIDGETS_CSS,
+    settings.hideBitrixWidgets
+  );
+  setInjectedStyle(
+    "cnc1-userpanel-hide-callback-buttons",
+    HIDE_CALLBACK_BUTTONS_CSS,
+    settings.hideCallbackButtons
+  );
+  setInjectedStyle(
+    "cnc1-userpanel-hide-involveo-widget",
+    HIDE_INVOLVEO_WIDGET_CSS,
+    settings.hideInvolveoWidget
+  );
+}
+
+export function applyDeferredSettings(settings: ExtensionSettings) {
   // Большинство DOM-инструментов рассчитаны на админку; каталог разрешен только для визуальных подсветок.
   const canRunEnhancements = !settings.runOnlyInAdmin || isBitrixAdminPage();
   const canRunSortHighlight = canRunEnhancements || isCatalogPage();
@@ -102,25 +125,9 @@ export function applyContentSettings(settings: ExtensionSettings) {
   } else {
     productArticleHighlight.stop();
   }
+}
 
-  setInjectedStyle(
-    "cnc1-userpanel-hide-social-widget",
-    HIDE_SOCIAL_WIDGET_CSS,
-    settings.hideSocialWidget
-  );
-  setInjectedStyle(
-    "cnc1-userpanel-hide-bitrix-widgets",
-    HIDE_BITRIX_WIDGETS_CSS,
-    settings.hideBitrixWidgets
-  );
-  setInjectedStyle(
-    "cnc1-userpanel-hide-callback-buttons",
-    HIDE_CALLBACK_BUTTONS_CSS,
-    settings.hideCallbackButtons
-  );
-  setInjectedStyle(
-    "cnc1-userpanel-hide-involveo-widget",
-    HIDE_INVOLVEO_WIDGET_CSS,
-    settings.hideInvolveoWidget
-  );
+export function applyContentSettings(settings: ExtensionSettings) {
+  applyCriticalSettings(settings);
+  applyDeferredSettings(settings);
 }
