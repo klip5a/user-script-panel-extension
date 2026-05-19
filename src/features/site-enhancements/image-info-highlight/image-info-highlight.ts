@@ -19,16 +19,15 @@ type ImageDimensions = {
 
 class ImageInfoHighlight {
   private enabled = false;
-  private observer: MutationObserver | null = null;
-  private scheduledScanId: number | null = null;
-  private scheduledBatchId: number | null = null;
-  private pendingImages: HTMLImageElement[] = [];
+  private mutationObserver: MutationObserver | null = null;
+  private intersectionObserver: IntersectionObserver | null = null;
   // Кэшируем вес по URL, чтобы повторные наведения на одинаковые картинки не делали новые HEAD-запросы.
   private readonly sizeCache = new Map<string, string | null>();
   // Кэшируем реальные размеры оригиналов; null означает, что размер уже пробовали получить, но не смогли.
   private readonly dimensionsCache = new Map<string, ImageDimensions | null>();
-  // DOM в каталоге часто дорисовывается лениво, поэтому сканирование надо сглаживать.
-  private readonly debouncedProcessImages: () => void;
+
+  private pendingImages: HTMLImageElement[] = [];
+  private scheduledBatchId: number | null = null;
   private readonly IMAGE_BATCH_SIZE = 20;
 
   // Целевые изображения: разделы каталога, карточки и галерея товара.
@@ -46,9 +45,7 @@ class ImageInfoHighlight {
     ".section_item .image img",
   ].join(",");
 
-  constructor() {
-    this.debouncedProcessImages = debounce(this.scheduleProcessImages.bind(this), 350);
-  }
+  constructor() {}
 
   start(): void {
     if (this.enabled) return;
@@ -56,16 +53,21 @@ class ImageInfoHighlight {
     // Стили добавляются один раз на документ, а бейджи уже создаются рядом с найденными картинками.
     this.injectStyles();
     this.initObserver();
-    this.scheduleProcessImages();
   }
 
   stop(): void {
     if (!this.enabled) return;
     this.enabled = false;
     // При выключении настройки возвращаем страницу в исходное состояние.
-    this.observer?.disconnect();
-    this.cancelScheduledWork();
+    this.mutationObserver?.disconnect();
+    this.intersectionObserver?.disconnect();
+    
+    if (this.scheduledBatchId !== null) {
+      cancelIdleTask(this.scheduledBatchId);
+      this.scheduledBatchId = null;
+    }
     this.pendingImages = [];
+    
     this.cleanup();
   }
 
@@ -73,45 +75,74 @@ class ImageInfoHighlight {
     const doc = getDocument();
     if (!doc?.body) return;
 
+    // Инициализируем IntersectionObserver для отложенной загрузки и подсветки
+    this.intersectionObserver = new IntersectionObserver((entries) => {
+      let hasNew = false;
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          const image = entry.target as HTMLImageElement;
+          
+          if (!image.closest(".image-info-highlight-wrap") && this.shouldEnhanceImage(image)) {
+            this.intersectionObserver?.unobserve(image); // обрабатываем один раз при успешном захвате
+            this.pendingImages.push(image);
+            hasNew = true;
+          }
+        }
+      }
+      if (hasNew) {
+        this.scheduleProcessBatch();
+      }
+    }, {
+      rootMargin: "200px", // начинаем обработку чуть заранее до появления на экране
+    });
+
     // Отслеживаем новые карточки/слайды после ajax, lazyload и перестроения каталога.
-    this.observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => mutation.addedNodes.length > 0)) {
-        this.debouncedProcessImages();
+    this.mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "childList") {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const element = node as HTMLElement;
+              // Проверяем сам элемент, если это img
+              if (element.matches?.(this.IMAGE_SELECTOR)) {
+                 this.intersectionObserver?.observe(element);
+              }
+              // Проверяем его потомков
+              if (element.querySelectorAll) {
+                const imgs = element.querySelectorAll<HTMLImageElement>(this.IMAGE_SELECTOR);
+                for (const img of imgs) {
+                  this.intersectionObserver?.observe(img);
+                }
+              }
+            }
+          }
+        } else if (mutation.type === "attributes") {
+          const target = mutation.target as HTMLElement;
+          if (target.tagName === "IMG" && target.matches?.(this.IMAGE_SELECTOR)) {
+            // Если у картинки изменился src (сработал lazyload), отправляем на повторную проверку
+            this.intersectionObserver?.observe(target);
+          }
+        }
       }
     });
-    this.observer.observe(doc.body, { childList: true, subtree: true });
-  }
-
-  private processImages(): void {
-    if (!this.enabled) return;
-
-    const doc = getDocument();
-    if (!doc) return;
-
-    // Быстро собираем кандидатов, а DOM-изменения выполняем отдельно небольшими пачками.
-    this.pendingImages = Array.from(doc.querySelectorAll<HTMLImageElement>(this.IMAGE_SELECTOR)).filter((image) => {
-      // Не обрабатываем картинку повторно, если ее родитель уже получил wrapper-класс.
-      if (image.closest(".image-info-highlight-wrap")) return false;
-      return this.shouldEnhanceImage(image);
+    this.mutationObserver.observe(doc.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src", "data-src", "data-webp-src", "data-webp-data-src"]
     });
 
-    this.scheduleProcessBatch();
-  }
-
-  private scheduleProcessImages(): void {
-    if (!this.enabled || this.scheduledScanId !== null) return;
-
-    // Стартовое сканирование переносим в idle, чтобы не конкурировать с загрузкой и первичной отрисовкой.
-    this.scheduledScanId = this.runWhenIdle(() => {
-      this.scheduledScanId = null;
-      this.processImages();
-    });
+    // Первоначальный поиск картинок
+    const images = doc.querySelectorAll<HTMLImageElement>(this.IMAGE_SELECTOR);
+    for (const img of images) {
+      this.intersectionObserver.observe(img);
+    }
   }
 
   private scheduleProcessBatch(): void {
     if (!this.enabled || this.scheduledBatchId !== null || this.pendingImages.length === 0) return;
 
-    this.scheduledBatchId = this.runWhenIdle((deadline) => {
+    this.scheduledBatchId = scheduleIdleTask((deadline) => {
       this.scheduledBatchId = null;
       this.processImageBatch(deadline);
     });
@@ -131,6 +162,7 @@ class ImageInfoHighlight {
       if (!image) continue;
       if (image.closest(".image-info-highlight-wrap")) continue;
       if (!this.shouldEnhanceImage(image)) continue;
+      
       this.enhanceImage(image);
       processedCount += 1;
     }
@@ -138,26 +170,9 @@ class ImageInfoHighlight {
     this.scheduleProcessBatch();
   }
 
-  private runWhenIdle(callback: (deadline: IdleDeadlineLike) => void): number {
-    return scheduleIdleTask(callback);
-  }
-
-  private cancelScheduledWork(): void {
-    if (this.scheduledScanId !== null) {
-      cancelIdleTask(this.scheduledScanId);
-      this.scheduledScanId = null;
-    }
-
-    if (this.scheduledBatchId !== null) {
-      cancelIdleTask(this.scheduledBatchId);
-      this.scheduledBatchId = null;
-    }
-  }
-
   private shouldEnhanceImage(image: HTMLImageElement): boolean {
     // Стикеры и мелкие декоративные изображения не относятся к товарным фото.
     if (image.closest(".detail-stickers-wrap")) return false;
-    if (image.width < 40 && image.height < 40) return false;
     // Бейдж позиционируется относительно родителя картинки, поэтому родитель обязателен.
     if (!image.parentElement) return false;
 
@@ -191,8 +206,6 @@ class ImageInfoHighlight {
       // Вес и неизвестные размеры догружаются только по наведению, чтобы не создавать лишний трафик.
       void this.loadOriginalImageInfo(image).then(syncBadge);
     });
-
-    void this.loadOriginalImageInfo(image).then(syncBadge);
 
     syncBadge();
   }
