@@ -6,7 +6,6 @@ import type {
 
 type ProductMassEditorAppProps = {
   open: boolean;
-  subtitle: string;
   codes: string;
   fields: ProductFieldDescriptor[];
   drafts: ProductMassEditorDraft[];
@@ -233,7 +232,6 @@ export function ProductMassEditorApp(props: ProductMassEditorAppProps) {
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
               gap: "16px",
               padding: "20px 24px",
               borderBottom: "1px solid #d7e2dc",
@@ -252,25 +250,7 @@ export function ProductMassEditorApp(props: ProductMassEditorAppProps) {
               >
                 Массовое редактирование товаров
               </h1>
-              <div style={{ marginTop: "6px", fontSize: "13px", color: "#5b6f69" }}>{props.subtitle}</div>
             </div>
-
-            <button
-              type="button"
-              onClick={props.onClose}
-              style={{
-                height: "38px",
-                padding: "0 16px",
-                borderRadius: "8px",
-                border: "1px solid #c7d5cf",
-                background: "#fff",
-                color: "#24433b",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              Закрыть
-            </button>
           </div>
 
           <div

@@ -2,6 +2,7 @@ export interface ProductGridContext {
   grid: HTMLElement;
   table: HTMLTableElement;
   actionPanel: HTMLElement | null;
+  controlPanelCell: HTMLElement | null;
 }
 
 export type ProductFieldKind =

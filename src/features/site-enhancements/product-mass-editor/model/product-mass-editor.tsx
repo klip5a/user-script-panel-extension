@@ -86,8 +86,12 @@ class ProductMassEditor {
       const actionPanel =
         bottomPanels?.querySelector<HTMLElement>(".main-grid-panel-wrap") ??
         grid.querySelector<HTMLElement>(".main-grid-action-panel");
+      const controlPanelCell =
+        bottomPanels?.querySelector<HTMLElement>(".main-grid-control-panel-cell") ??
+        actionPanel?.querySelector<HTMLElement>(".main-grid-control-panel-cell") ??
+        null;
 
-      return { grid, table, actionPanel };
+      return { grid, table, actionPanel, controlPanelCell };
     }
 
     return null;
@@ -95,43 +99,23 @@ class ProductMassEditor {
 
   private injectProductMassEditButton(doc: Document): void {
     const context = this.findProductGridContext(doc);
-    if (!context?.actionPanel || doc.getElementById(this.PRODUCT_MASS_EDIT_BTN_ID)) return;
+    if ((!context?.controlPanelCell && !context?.actionPanel) || doc.getElementById(this.PRODUCT_MASS_EDIT_BTN_ID)) return;
 
-    const host = doc.createElement("div");
+    const host = doc.createElement("span");
     host.id = this.PRODUCT_MASS_EDIT_BTN_HOST_ID;
+    host.className = "main-grid-panel-control-container";
     Object.assign(host.style, {
-      display: "flex",
-      justifyContent: "flex-end",
-      paddingTop: "12px",
+      marginLeft: "8px",
+      verticalAlign: "middle",
     });
 
     const button = doc.createElement("button");
     button.type = "button";
     button.id = this.PRODUCT_MASS_EDIT_BTN_ID;
+    button.className = "ui-btn ui-btn-primary";
     button.textContent = "Массовое редактирование";
     button.title = "Открыть окно массового редактирования товаров";
-    Object.assign(button.style, {
-      height: "38px",
-      padding: "0 18px",
-      borderRadius: "8px",
-      border: "1px solid #0f766e",
-      background: "#14b8a6",
-      color: "#062c2c",
-      fontSize: "14px",
-      fontWeight: "600",
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      marginLeft: "12px",
-      alignSelf: "center",
-      boxShadow: "0 8px 18px rgba(20, 184, 166, 0.18)",
-    });
-
-    button.addEventListener("mouseenter", () => {
-      button.style.background = "#0d9488";
-    });
-    button.addEventListener("mouseleave", () => {
-      button.style.background = "#14b8a6";
-    });
+    button.style.whiteSpace = "nowrap";
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -139,7 +123,18 @@ class ProductMassEditor {
     });
 
     host.appendChild(button);
-    context.actionPanel.appendChild(host);
+
+    if (context.controlPanelCell) {
+      const cancelContainer = context.controlPanelCell.querySelector<HTMLElement>("#grid_cancel_button");
+      if (cancelContainer?.parentNode) {
+        cancelContainer.insertAdjacentElement("afterend", host);
+      } else {
+        context.controlPanelCell.appendChild(host);
+      }
+      return;
+    }
+
+    context.actionPanel?.appendChild(host);
   }
 
   private removeProductMassEditButton(): void {
@@ -199,7 +194,6 @@ class ProductMassEditor {
     render(
       <ProductMassEditorApp
         open={this.isOpen}
-        subtitle={context ? `Источник: текущая таблица Bitrix, строк на странице: ${this.getProductEditableRows(context.table).length}` : ""}
         codes={this.codes}
         fields={fields}
         drafts={drafts}
