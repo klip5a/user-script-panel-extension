@@ -1,7 +1,6 @@
 export type ExtensionSettingKey =
   | "sortHighlightEnabled"
   | "selectHelperEnabled"
-  | "propertySorterEnabled"
   | "filterSortCheckEnabled"
   | "imageInfoHighlightEnabled"
   | "hideSocialWidget"
@@ -12,7 +11,6 @@ export type ExtensionSettingKey =
 export type ExtensionSettings = {
   sortHighlightEnabled: boolean;
   selectHelperEnabled: boolean;
-  propertySorterEnabled: boolean;
   filterSortCheckEnabled: boolean;
   imageInfoHighlightEnabled: boolean;
   hideSocialWidget: boolean;
@@ -34,7 +32,6 @@ export type SettingItem = {
 export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   sortHighlightEnabled: false,
   selectHelperEnabled: false,
-  propertySorterEnabled: false,
   filterSortCheckEnabled: false,
   imageInfoHighlightEnabled: false,
   hideSocialWidget: false,
@@ -53,11 +50,6 @@ export const ENHANCEMENT_SETTINGS: SettingItem[] = [
     key: "selectHelperEnabled",
     title: "Поиск по select",
     description: "Добавляет поиск рядом с большими списками свойств."
-  },
-  {
-    key: "propertySorterEnabled",
-    title: "Сортировка свойств",
-    description: "Добавляет автосортировку значений свойства типа список."
   },
   {
     key: "filterSortCheckEnabled",

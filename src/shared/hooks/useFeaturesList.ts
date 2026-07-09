@@ -27,10 +27,6 @@ export function useFeaturesList() {
     "userScriptPanel.widgets.involveo.disabled",
     false,
   );
-  const [propertySorterEnable, setPropertySorterEnable] = useStoredFlag(
-    "userScriptPanel.propertySorter.enabled",
-    false,
-  );
   const [filterSortCheckEnable, setFilterSortCheckEnable] = useStoredFlag(
     "userScriptPanel.filterSortCheck.enabled",
     false,
@@ -39,7 +35,6 @@ export function useFeaturesList() {
   return {
     sortHighlightEnable,
     selectHelperEnable,
-    propertySorterEnable,
     filterSortCheckEnable,
     styles: [
       {
@@ -86,13 +81,6 @@ export function useFeaturesList() {
         description: "Добавляет кнопку поиска рядом с select'ами свойств товара",
         enabled: selectHelperEnable,
         onToggle: setSelectHelperEnable,
-      },
-      {
-        id: "propertySorter",
-        title: "Сортировка свойств",
-        description: "Добавляет кнопку автосортировки значений свойства типа 'список' в Битриксе",
-        enabled: propertySorterEnable,
-        onToggle: setPropertySorterEnable,
       },
       {
         id: "filterSortCheck",
