@@ -7,11 +7,8 @@ import {
 import {
   parseValue,
   compareParsed,
-  compareNaturalTextValues,
   type ParsedValue,
-} from "../property-sorter/utils/sort-value-parser";
-
-type FilterCompareMode = "parsed" | "naturalText";
+} from "../../../shared/sort-schema";
 
 interface PropertyCheckResult {
   propertyId: string;
@@ -162,8 +159,6 @@ class FilterSortCheck {
     const sortableValues = values.filter((v) => v.text.trim().length > 0);
     if (sortableValues.length < 2) return;
 
-    const compareMode = this.getCompareMode(sortableValues);
-
     // Находим нарушения порядка - проверяем возрастание в оригинальном порядке
     const violations: ViolationInfo[] = [];
 
@@ -171,7 +166,7 @@ class FilterSortCheck {
       const prev = sortableValues[i - 1];
       const curr = sortableValues[i];
       // Если текущее значение меньше предыдущего - это нарушение
-      if (this.compareFilterValues(prev, curr, compareMode) > 0) {
+      if (compareParsed(prev.parsed, curr.parsed) > 0) {
         violations.push({
           index: i,
           value: curr.text,
@@ -241,24 +236,6 @@ class FilterSortCheck {
 
   private getValueText(element: HTMLElement): string {
     return element.getAttribute("title") || element.textContent?.trim() || "";
-  }
-
-  private getCompareMode(values: { parsed: ParsedValue }[]): FilterCompareMode {
-    const hasNumbers = values.some((value) => value.parsed.type === "number");
-    const hasStrings = values.some((value) => value.parsed.type === "string");
-    return hasNumbers && hasStrings ? "naturalText" : "parsed";
-  }
-
-  private compareFilterValues(
-    a: { text: string; parsed: ParsedValue },
-    b: { text: string; parsed: ParsedValue },
-    mode: FilterCompareMode,
-  ): number {
-    if (mode === "naturalText") {
-      return compareNaturalTextValues(a.text, b.text);
-    }
-
-    return compareParsed(a.parsed, b.parsed);
   }
 
   private addBadge(box: HTMLElement, result: PropertyCheckResult) {

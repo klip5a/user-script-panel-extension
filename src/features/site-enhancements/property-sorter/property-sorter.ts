@@ -3,11 +3,7 @@ import {
   type ParsedValue,
   parseValue,
   compareParsed,
-  compareNaturalTextValues,
-  determineSortMultiplier,
-  determineSortFormat,
-  formatSortValue,
-} from "./utils/sort-value-parser";
+} from "../../../shared/sort-schema";
 
 /**
  * Данные строки таблицы свойств
@@ -18,12 +14,14 @@ interface PropertyRowData {
   /** Input элемент со значением */
   valueInput: HTMLInputElement;
   /** Input элемент с сортировкой */
-  sortInput: HTMLInputElement | null;
+  sortInput: HTMLInputElement;
   /** Строка таблицы */
   row: HTMLTableRowElement;
   /** Распарсенное значение для сортировки */
   parsed: ParsedValue;
 }
+
+const PROPERTY_SORTER_VERSION = "v4";
 
 /**
  * Класс для автосортировки значений свойства типа "список" в Битриксе
@@ -34,6 +32,7 @@ interface PropertyRowData {
 class PropertySorter {
   private enabled: boolean = false;
   private observer: MutationObserver | null = null;
+  private delegatedClickDoc: Document | null = null;
   private debouncedCheckAndInject: () => void;
 
   /** ID таблицы свойств */
@@ -66,6 +65,8 @@ class PropertySorter {
     if (!this.enabled) return;
     this.enabled = false;
     this.observer?.disconnect();
+    this.delegatedClickDoc?.removeEventListener("click", this.handleDelegatedClick, true);
+    this.delegatedClickDoc = null;
     this.removeSortButton();
   }
 
@@ -76,11 +77,37 @@ class PropertySorter {
     const doc = getDocument();
     if (!doc) return;
 
+    this.bindDelegatedClick(doc);
+
     this.observer = new MutationObserver(() => {
       this.debouncedCheckAndInject();
     });
     this.observer.observe(doc.body, { childList: true, subtree: true });
   }
+
+  private bindDelegatedClick(doc: Document): void {
+    if (this.delegatedClickDoc === doc) return;
+
+    this.delegatedClickDoc?.removeEventListener("click", this.handleDelegatedClick, true);
+    doc.addEventListener("click", this.handleDelegatedClick, true);
+    this.delegatedClickDoc = doc;
+  }
+
+  private readonly handleDelegatedClick = (event: Event): void => {
+    const target = event.target as Element | null;
+    const sortBtn = target?.closest?.(`#${this.SORT_BTN_ID}`);
+    if (!sortBtn) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (sortBtn instanceof HTMLInputElement) {
+      sortBtn.value = `Сортировка ${PROPERTY_SORTER_VERSION}: запуск`;
+    }
+
+    this.performSort(sortBtn.ownerDocument);
+  };
 
   /**
    * Проверяет наличие таблицы и инъецирует кнопку
@@ -111,7 +138,8 @@ class PropertySorter {
     sortBtn.type = "button";
     sortBtn.id = this.SORT_BTN_ID;
     sortBtn.className = "adm-btn-big";
-    sortBtn.value = "Сортировка";
+    sortBtn.value = `Сортировка ${PROPERTY_SORTER_VERSION}`;
+    sortBtn.title = "Автосортировка значений свойства";
     Object.assign(sortBtn.style, {
       marginLeft: "8px",
       background: "#059669",
@@ -121,7 +149,6 @@ class PropertySorter {
       cursor: "pointer",
     });
 
-    sortBtn.addEventListener("click", () => this.performSort(doc));
     sortBtn.addEventListener("mouseenter", () => {
       sortBtn.style.background = "#047857";
     });
@@ -160,72 +187,81 @@ class PropertySorter {
     }
 
     // Собираем данные из строк
-    const dataRows = this.collectRowData(tbody);
+    const dataRows = this.collectRowData(table);
     if (dataRows.length === 0) {
       this.showNotification(doc, "Нет данных для сортировки", "warning");
       return;
     }
 
-    // Сортируем по value
-    const hasNumbers = dataRows.some((item) => item.parsed.type === "number");
-    const hasStrings = dataRows.some((item) => item.parsed.type === "string");
-    const hasMixedCodes = hasNumbers && hasStrings;
+    dataRows.sort((a, b) => compareParsed(a.parsed, b.parsed));
+    this.reorderRows(tbody, dataRows);
 
-    dataRows.sort((a, b) => (
-      hasMixedCodes
-        ? compareNaturalTextValues(a.valueInput.value, b.valueInput.value)
-        : compareParsed(a.parsed, b.parsed)
-    ));
-
-    // Определяем множитель на основе наличия дробных чисел
-    const allParsed = dataRows.map((item) => item.parsed);
-    const multiplier = determineSortMultiplier(allParsed);
-    const sortFormat = determineSortFormat(allParsed, multiplier);
-    const stringSortBase = Math.pow(10, sortFormat.padLength);
-    let stringSortIndex = 0;
-
-    // Записываем новые значения SORT
-    // SORT = категория + значение * multiplier (категория 0=квадрат, 1=обычное, 2=диаметр)
+    // После сортировки пишем последовательные SORT-значения, чтобы Bitrix не переупорядочивал их сам.
+    let sortIndex = 1;
     dataRows.forEach((item) => {
-      if (!item.sortInput) {
-        return;
-      }
-
-      const newSort = hasMixedCodes
-        ? String(stringSortIndex++).padStart(sortFormat.padLength, "0")
-        : item.parsed.type === "number"
-          ? formatSortValue(item.parsed, multiplier, sortFormat)
-          : String(stringSortBase + stringSortIndex++).padStart(sortFormat.padLength + 1, "0");
+      const newSort = String(sortIndex++);
 
       item.sortInput.value = newSort;
+      item.sortInput.dispatchEvent(new Event("input", { bubbles: true }));
+      item.sortInput.dispatchEvent(new Event("change", { bubbles: true }));
       this.highlightInput(item.sortInput);
     });
 
-    const multiplierText = multiplier === 100 ? " (×100)" : "";
+    const firstValues = dataRows
+      .slice(0, 3)
+      .map((item) => item.valueInput.value.trim())
+      .join(", ");
+    const has06IR = dataRows.some((item) => item.valueInput.value.trim() === "06IR..");
+
+    console.info("[PropertySorter]", {
+      version: PROPERTY_SORTER_VERSION,
+      rows: dataRows.length,
+      firstValues,
+      has06IR,
+    });
+
     this.showNotification(
       doc,
-      `Отсортировано ${dataRows.length} значений${multiplierText}`,
+      `${PROPERTY_SORTER_VERSION}: отсортировано ${dataRows.length}; первые: ${firstValues || "—"}${has06IR ? "; 06IR найден" : ""}`,
       "success",
     );
+
+    const sortBtn = doc.getElementById(this.SORT_BTN_ID);
+    if (sortBtn instanceof HTMLInputElement) {
+      sortBtn.value = `Сортировка ${PROPERTY_SORTER_VERSION}`;
+    }
+  }
+
+  private reorderRows(tbody: HTMLTableSectionElement, dataRows: PropertyRowData[]): void {
+    const rowsToMove = new Set(dataRows.map((item) => item.row));
+    const firstRow = Array.from(tbody.rows).find((row) => rowsToMove.has(row));
+    if (!firstRow) return;
+
+    const marker = tbody.ownerDocument.createComment("property-sorter-order");
+    tbody.insertBefore(marker, firstRow);
+
+    const fragment = tbody.ownerDocument.createDocumentFragment();
+    dataRows.forEach((item) => fragment.appendChild(item.row));
+    tbody.insertBefore(fragment, marker);
+    marker.remove();
   }
 
   /**
    * Собирает данные из строк таблицы
    */
-  private collectRowData(tbody: HTMLTableSectionElement): PropertyRowData[] {
-    const rows = Array.from(tbody.rows);
+  private collectRowData(table: HTMLTableElement): PropertyRowData[] {
+    const valueInputs = Array.from(table.querySelectorAll<HTMLInputElement>('input[name$="[VALUE]"]'));
     const dataRows: PropertyRowData[] = [];
 
-    for (const row of rows) {
-      // Пропускаем заголовок
-      if (row.classList.contains("heading")) continue;
+    for (const valueInput of valueInputs) {
+      const row = valueInput.closest("tr");
+      if (!row || row.classList.contains("heading")) {
+        continue;
+      }
 
-      // Ищем input с VALUE
-      const valueInput = row.querySelector<HTMLInputElement>('input[name$="[VALUE]"]');
-      const sortInput = row.querySelector<HTMLInputElement>('input[name$="[SORT]"]');
-
-      if (!valueInput) {
-        // Пропускаем строку "нет значения по умолчанию"
+      const sortInput = this.findSortInput(table, row, valueInput);
+      if (!sortInput) {
+        // Иногда Bitrix рендерит SORT вне самой строки. Без него строку лучше пропустить, чем ломать форму.
         continue;
       }
 
@@ -246,6 +282,25 @@ class PropertySorter {
     }
 
     return dataRows;
+  }
+
+  private findSortInput(
+    table: HTMLTableElement,
+    row: HTMLTableRowElement,
+    valueInput: HTMLInputElement,
+  ): HTMLInputElement | null {
+    const rowSortInput = row.querySelector<HTMLInputElement>('input[name$="[SORT]"]');
+    if (rowSortInput) {
+      return rowSortInput;
+    }
+
+    const sortName = valueInput.name.replace(/\[VALUE\]$/, "[SORT]");
+
+    return table.querySelector<HTMLInputElement>(`input[name="${this.escapeAttributeValue(sortName)}"]`);
+  }
+
+  private escapeAttributeValue(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   }
 
   /**
