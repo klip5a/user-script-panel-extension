@@ -4,6 +4,7 @@ import {
   productArticleHighlight,
   productMassEditor,
   propertySorter,
+  sectionFilterSearch,
   sectionSorter,
   selectHelper,
   sortHighlight,
@@ -94,6 +95,7 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
 
   propertySorter.start();
   sectionSorter.start();
+  sectionFilterSearch.start();
   productMassEditor.start();
 
   if (settings.filterSortCheckEnabled) {
