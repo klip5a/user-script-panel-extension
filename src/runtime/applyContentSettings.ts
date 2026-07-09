@@ -2,7 +2,9 @@ import {
   filterSortCheck,
   imageInfoHighlight,
   productArticleHighlight,
+  productMassEditor,
   propertySorter,
+  sectionSorter,
   selectHelper,
   sortHighlight,
 } from "../features";
@@ -91,6 +93,8 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
   }
 
   propertySorter.start();
+  sectionSorter.start();
+  productMassEditor.start();
 
   if (settings.filterSortCheckEnabled) {
     filterSortCheck.start();
