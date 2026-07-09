@@ -1,6 +1,5 @@
 import {
   cancelIdleTask,
-  debounce,
   getDocument,
   type IdleDeadlineLike,
   scheduleIdleTask,
