@@ -36,14 +36,6 @@ const HIDE_INVOLVEO_WIDGET_CSS = `
   }
 `;
 
-function isBitrixAdminPage(): boolean {
-  return document.body.id === "bx-admin-prefix" || location.pathname.startsWith("/bitrix/admin/");
-}
-
-function isCatalogPage(): boolean {
-  return location.pathname.startsWith("/catalog/");
-}
-
 // Один и тот же style-тег переиспользуется при переключении настройки, чтобы не плодить дубли.
 function setInjectedStyle(id: string, css: string, enabled: boolean) {
   const existing = document.getElementById(id);
@@ -86,45 +78,37 @@ export function applyCriticalSettings(settings: ExtensionSettings) {
 }
 
 export function applyDeferredSettings(settings: ExtensionSettings) {
-  // Большинство DOM-инструментов рассчитаны на админку; каталог разрешен только для визуальных подсветок.
-  const canRunEnhancements = !settings.runOnlyInAdmin || isBitrixAdminPage();
-  const canRunSortHighlight = canRunEnhancements || isCatalogPage();
-
-  if (canRunSortHighlight && settings.sortHighlightEnabled) {
+  if (settings.sortHighlightEnabled) {
     sortHighlight.start();
   } else {
     sortHighlight.stop();
   }
 
-  if (canRunEnhancements && settings.selectHelperEnabled) {
+  if (settings.selectHelperEnabled) {
     selectHelper.injectButtons();
   } else {
     selectHelper.removeButtons();
   }
 
-  if (canRunEnhancements && settings.propertySorterEnabled) {
+  if (settings.propertySorterEnabled) {
     propertySorter.start();
   } else {
     propertySorter.stop();
   }
 
-  if (canRunEnhancements && settings.filterSortCheckEnabled) {
+  if (settings.filterSortCheckEnabled) {
     filterSortCheck.start();
   } else {
     filterSortCheck.stop();
   }
 
-  if (canRunSortHighlight && settings.imageInfoHighlightEnabled) {
+  if (settings.imageInfoHighlightEnabled) {
     imageInfoHighlight.start();
   } else {
     imageInfoHighlight.stop();
   }
 
-  if (canRunSortHighlight) {
-    productArticleHighlight.start();
-  } else {
-    productArticleHighlight.stop();
-  }
+  productArticleHighlight.start();
 }
 
 export function applyContentSettings(settings: ExtensionSettings) {
