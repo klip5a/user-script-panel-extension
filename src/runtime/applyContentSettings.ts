@@ -90,11 +90,7 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
     selectHelper.removeButtons();
   }
 
-  if (settings.propertySorterEnabled) {
-    propertySorter.start();
-  } else {
-    propertySorter.stop();
-  }
+  propertySorter.start();
 
   if (settings.filterSortCheckEnabled) {
     filterSortCheck.start();

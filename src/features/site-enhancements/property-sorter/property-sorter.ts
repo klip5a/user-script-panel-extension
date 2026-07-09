@@ -21,6 +21,13 @@ interface PropertyRowData {
   parsed: ParsedValue;
 }
 
+interface SectionRowData {
+  nameInput: HTMLInputElement;
+  sortInput: HTMLInputElement;
+  row: HTMLTableRowElement;
+  name: string;
+}
+
 const PROPERTY_SORTER_VERSION = "v4";
 
 /**
@@ -39,6 +46,8 @@ class PropertySorter {
   private readonly TABLE_ID = "list-tbl";
   /** ID кнопки сортировки */
   private readonly SORT_BTN_ID = "propedit_auto_sort_btn";
+  /** ID кнопки сортировки разделов */
+  private readonly SECTION_SORT_BTN_ID = "section_auto_sort_btn";
   /** ID кнопки "Еще..." */
   private readonly ADD_BTN_ID = "propedit_add_btn";
   /** Паттерн для извлечения ID из name атрибута */
@@ -68,6 +77,7 @@ class PropertySorter {
     this.delegatedClickDoc?.removeEventListener("click", this.handleDelegatedClick, true);
     this.delegatedClickDoc = null;
     this.removeSortButton();
+    this.removeSectionSortButton();
   }
 
   /**
@@ -120,6 +130,164 @@ class PropertySorter {
     if (table) {
       this.injectSortButton(doc);
     }
+
+    this.injectSectionSortButton(doc);
+  }
+
+  private collectSectionRows(table: HTMLTableElement): SectionRowData[] {
+    const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr.main-grid-row-edit"));
+    const result: SectionRowData[] = [];
+    const checkedRows = rows.filter((row) => row.classList.contains("main-grid-row-checked"));
+    const targetRows = checkedRows.length > 0 ? checkedRows : rows;
+
+    for (const row of targetRows) {
+      const nameCell = row.querySelector<HTMLElement>('td[data-column-id="NAME"]');
+      const sortCell = row.querySelector<HTMLElement>('td[data-column-id="SORT"]');
+      if (!nameCell || !sortCell) continue;
+
+      const nameInput = nameCell.querySelector<HTMLInputElement>('input.main-grid-editor[name="NAME"]');
+      const sortInput = sortCell.querySelector<HTMLInputElement>('input.main-grid-editor[name="SORT"]');
+      if (!nameInput || !sortInput) continue;
+
+      const name = nameInput.value.trim();
+      if (!name) continue;
+
+      result.push({ nameInput, sortInput, row, name });
+    }
+
+    return result;
+  }
+
+  private reorderSectionRows(tbody: HTMLTableSectionElement, rows: SectionRowData[]): void {
+    const rowsToMove = new Set(rows.map((item) => item.row));
+    const firstRow = Array.from(tbody.rows).find((row) => rowsToMove.has(row));
+    if (!firstRow) return;
+
+    const marker = tbody.ownerDocument.createComment("property-sorter-section-order");
+    tbody.insertBefore(marker, firstRow);
+
+    const fragment = tbody.ownerDocument.createDocumentFragment();
+    rows.forEach((item) => fragment.appendChild(item.row));
+    tbody.insertBefore(fragment, marker);
+    marker.remove();
+  }
+
+  private applySectionSortValues(rows: SectionRowData[]): void {
+    let sortValue = 50;
+
+    rows.forEach((item) => {
+      const nextValue = String(sortValue);
+      sortValue += 50;
+
+      item.sortInput.value = nextValue;
+      item.sortInput.dispatchEvent(new Event("input", { bubbles: true }));
+      item.sortInput.dispatchEvent(new Event("change", { bubbles: true }));
+      this.highlightInput(item.sortInput);
+    });
+  }
+
+  private injectSectionSortButton(doc: Document): void {
+    const headerCell = Array.from(doc.querySelectorAll<HTMLElement>('th[data-name="SORT"]')).find(
+      (cell) => cell.textContent?.includes("Сортировка") ?? false,
+    );
+    if (!headerCell) return;
+
+    if (headerCell.querySelector(`#${this.SECTION_SORT_BTN_ID}`)) return;
+
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.id = this.SECTION_SORT_BTN_ID;
+    button.textContent = "A-Z";
+    button.title = "Отсортировать разделы по названию и проставить SORT шагом 50";
+    Object.assign(button.style, {
+      padding: "1px 6px",
+      fontSize: "11px",
+      lineHeight: "14px",
+      height: "18px",
+      background: "#059669",
+      color: "#000",
+      fontWeight: "600",
+      border: "1px solid #047857",
+      cursor: "pointer",
+      borderRadius: "4px",
+      flex: "0 0 auto",
+      whiteSpace: "nowrap",
+      alignSelf: "center",
+      marginTop: "2px",
+    });
+
+    button.addEventListener("mouseenter", () => {
+      button.style.background = "#047857";
+    });
+    button.addEventListener("mouseleave", () => {
+      button.style.background = "#059669";
+    });
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.sortSectionGrid(button);
+    });
+
+    const titleWrap = headerCell.querySelector<HTMLElement>(".main-grid-cell-head-container");
+    if (titleWrap) {
+      titleWrap.style.width = "auto";
+      titleWrap.style.minWidth = "max-content";
+      titleWrap.style.maxWidth = "none";
+      titleWrap.style.display = "flex";
+      titleWrap.style.flexDirection = "column";
+      titleWrap.style.alignItems = "center";
+      titleWrap.style.justifyContent = "center";
+      headerCell.style.overflow = "visible";
+      titleWrap.style.overflow = "visible";
+      titleWrap.style.gap = "2px";
+
+      const title = titleWrap.querySelector<HTMLElement>(".main-grid-head-title");
+      if (title) {
+        title.after(button);
+        return;
+      }
+    }
+
+    headerCell.appendChild(button);
+  }
+
+  private removeSectionSortButton(): void {
+    const doc = getDocument();
+    if (!doc) return;
+
+    doc.getElementById(this.SECTION_SORT_BTN_ID)?.remove();
+  }
+
+  private sortSectionGrid(trigger: HTMLElement): void {
+    const doc = trigger.ownerDocument;
+    const table = trigger.closest<HTMLTableElement>("table.main-grid-table");
+    if (!table) {
+      this.showNotification(doc, "Таблица разделов не найдена", "error");
+      return;
+    }
+
+    const tbody = table.tBodies[0];
+    if (!tbody) {
+      this.showNotification(doc, "Тело таблицы не найдено", "error");
+      return;
+    }
+
+    const rows = this.collectSectionRows(table);
+    if (rows.length < 2) {
+      this.showNotification(doc, "Недостаточно строк для сортировки", "warning");
+      return;
+    }
+
+    rows.sort((a, b) => a.name.localeCompare(b.name, "ru", { sensitivity: "base" }));
+    this.reorderSectionRows(tbody, rows);
+    this.applySectionSortValues(rows);
+
+    this.showNotification(
+      doc,
+      `Разделы отсортированы по алфавиту, SORT проставлен шагом 50 (${rows.length})`,
+      "success",
+    );
   }
 
   /**
