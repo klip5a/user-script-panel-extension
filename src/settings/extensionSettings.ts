@@ -7,8 +7,7 @@ export type ExtensionSettingKey =
   | "hideSocialWidget"
   | "hideBitrixWidgets"
   | "hideCallbackButtons"
-  | "hideInvolveoWidget"
-  | "runOnlyInAdmin";
+  | "hideInvolveoWidget";
 
 export type ExtensionSettings = {
   sortHighlightEnabled: boolean;
@@ -20,7 +19,6 @@ export type ExtensionSettings = {
   hideBitrixWidgets: boolean;
   hideCallbackButtons: boolean;
   hideInvolveoWidget: boolean;
-  runOnlyInAdmin: boolean;
 };
 
 export type BooleanSettingKey = {
@@ -42,8 +40,7 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   hideSocialWidget: false,
   hideBitrixWidgets: false,
   hideCallbackButtons: false,
-  hideInvolveoWidget: false,
-  runOnlyInAdmin: true
+  hideInvolveoWidget: false
 };
 
 export const ENHANCEMENT_SETTINGS: SettingItem[] = [
@@ -94,13 +91,5 @@ export const STYLE_SETTINGS: SettingItem[] = [
     key: "hideInvolveoWidget",
     title: "Скрыть Involveo",
     description: "Отключает involveo-widget на странице."
-  }
-];
-
-export const RUNTIME_SETTINGS: SettingItem[] = [
-  {
-    key: "runOnlyInAdmin",
-    title: "Только в админке Bitrix",
-    description: "Не запускать DOM-улучшения на публичной части сайта."
   }
 ];

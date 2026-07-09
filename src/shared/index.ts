@@ -1,5 +1,6 @@
 export * from "./utils";
 export * from "./hooks";
+export * from "./sort-schema";
 export type {
   PanelPlacement,
   ActiveWindow,
