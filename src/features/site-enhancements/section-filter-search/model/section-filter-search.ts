@@ -12,8 +12,6 @@ class SectionFilterSearch {
   private readonly styleId = "section-filter-search-styles";
   private readonly helperSelector = ".section-filter-search-helper";
   private readonly fieldSelector = '.main-ui-control-field[data-name="SECTION_ID"]';
-  private readonly portalSelector = ".section-filter-search-portal";
-
   constructor() {
     this.debouncedUpdate = debounce(this.update.bind(this), 150);
   }

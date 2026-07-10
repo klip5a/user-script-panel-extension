@@ -3,5 +3,6 @@ export type {
   ProductFieldKind,
   ProductFieldOption,
   ProductGridContext,
+  ProductMassEditorDraft,
   ProductMassEditorFieldState,
 } from "./model/types";
