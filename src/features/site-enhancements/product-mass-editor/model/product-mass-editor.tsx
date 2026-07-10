@@ -260,7 +260,7 @@ class ProductMassEditor {
       const existing = this.drafts.get(field.id);
       next.set(field.id, existing ?? { key: field.id, fieldId: field.id, active: false });
     });
-    this.drafts.forEach((draft, key) => {
+    this.drafts.forEach((_, key) => {
       if (!next.has(key)) {
         this.removeDraftState(key);
       }
@@ -500,26 +500,110 @@ class ProductMassEditor {
     }
 
     try {
-      const response = await fetch(field.searchUrl, { credentials: "same-origin" });
-      const html = await response.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-      const rows = Array.from(doc.querySelectorAll<HTMLTableRowElement>("table.adm-list-table tbody tr"));
+      const initialDoc = await this.fetchHtmlDocument(field.searchUrl);
+      const totalItems = this.readLinkedOptionsTotalCount(initialDoc);
+      const initialOptions = this.extractLinkedOptions(initialDoc);
 
-      const options = rows
-        .map((row) => {
-          const cells = row.querySelectorAll<HTMLTableCellElement>("td");
-          const id = cells[1]?.textContent?.trim() ?? "";
-          const label = cells[5]?.childNodes[0]?.textContent?.trim() ?? cells[5]?.textContent?.trim() ?? "";
-          return { value: id, label };
-        })
-        .filter((item) => item.value && item.label);
+      let options = initialOptions;
+      if (totalItems > initialOptions.length) {
+        const fullListUrl =
+          this.extractShowAllUrl(initialDoc, field.searchUrl) ?? this.buildShowAllUrl(field.searchUrl, field.searchUrl);
+
+        if (fullListUrl) {
+          const fullDoc = await this.fetchHtmlDocument(fullListUrl);
+          const fullOptions = this.extractLinkedOptions(fullDoc);
+          if (fullOptions.length > options.length) {
+            options = fullOptions;
+          }
+        }
+      }
 
       this.linkedOptionsCache.set(field.searchUrl, options);
       return options;
     } catch (error) {
       console.warn("[ProductMassEditor] linked options fetch failed", error);
       return [];
+    }
+  }
+
+  private async fetchHtmlDocument(url: string): Promise<Document> {
+    const response = await fetch(url, { credentials: "same-origin" });
+    const html = await response.text();
+    const parser = new DOMParser();
+    return parser.parseFromString(html, "text/html");
+  }
+
+  private extractLinkedOptions(doc: Document): ProductFieldOption[] {
+    const rows = Array.from(doc.querySelectorAll<HTMLTableRowElement>("table.adm-list-table tbody tr"));
+    const seen = new Set<string>();
+
+    return rows
+      .map((row) => {
+        const cells = row.querySelectorAll<HTMLTableCellElement>("td");
+        const value = cells[1]?.textContent?.trim() ?? "";
+        const label = cells[5]?.childNodes[0]?.textContent?.trim() ?? cells[5]?.textContent?.trim() ?? "";
+        return { value, label };
+      })
+      .filter((item) => {
+        if (!item.value || !item.label || seen.has(item.value)) return false;
+        seen.add(item.value);
+        return true;
+      });
+  }
+
+  private readLinkedOptionsTotalCount(doc: Document): number {
+    const text = doc.querySelector<HTMLElement>(".adm-nav-pages-total-block")?.textContent ?? "";
+    const match = text.match(/из\s+(\d+)/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  private extractShowAllUrl(doc: Document, fallbackUrl: string): string | null {
+    const selects = Array.from(doc.querySelectorAll<HTMLSelectElement>(".adm-nav-pages-number-block select"));
+
+    for (const select of selects) {
+      const onchange = select.getAttribute("onchange") ?? "";
+      const match = onchange.match(/GetAdminList\('([^']*SHOWALL_\d+=1[^']*)'/);
+      if (match?.[1]) {
+        return this.resolveRelativeUrl(match[1], fallbackUrl);
+      }
+    }
+
+    return null;
+  }
+
+  private buildShowAllUrl(rawUrl: string, baseUrl: string): string | null {
+    try {
+      const url = new URL(this.resolveRelativeUrl(rawUrl, baseUrl));
+      const pagerIndex = this.detectPagerIndex(url);
+
+      url.searchParams.set(`PAGEN_${pagerIndex}`, "1");
+      url.searchParams.set(`SHOWALL_${pagerIndex}`, "1");
+      url.searchParams.delete(`SIZEN_${pagerIndex}`);
+
+      return url.toString();
+    } catch (error) {
+      console.warn("[ProductMassEditor] failed to build show-all url", error);
+      return null;
+    }
+  }
+
+  private detectPagerIndex(url: URL): string {
+    for (const key of url.searchParams.keys()) {
+      const match = key.match(/^(?:PAGEN|SHOWALL|SIZEN)_(\d+)$/);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    return "1";
+  }
+
+  private resolveRelativeUrl(url: string, baseUrl: string): string {
+    try {
+      return new URL(url, baseUrl).toString();
+    } catch {
+      const fallbackBase = getDocument()?.location.href ?? window.location.href;
+      return new URL(url, fallbackBase).toString();
     }
   }
 
