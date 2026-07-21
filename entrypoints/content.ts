@@ -1,3 +1,5 @@
+import "./content/view-transitions.css";
+
 import { applyCriticalSettings, applyDeferredSettings } from "../src/runtime/applyContentSettings";
 import { getExtensionSettings, subscribeToExtensionSettings } from "../src/settings/storage";
 

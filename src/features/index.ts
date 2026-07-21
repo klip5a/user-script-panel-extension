@@ -3,6 +3,7 @@ export { SelectHelper, selectHelper } from "./site-enhancements/select-helper";
 export { propertySorter } from "./site-enhancements/property-sorter";
 export { sectionSorter } from "./site-enhancements/section-sorter";
 export { sectionFilterSearch } from "./site-enhancements/section-filter-search";
+export { componentParamsVisibility } from "./site-enhancements/component-params-visibility";
 export { productMassEditor } from "./site-enhancements/product-mass-editor";
 export { filterSortCheck } from "./site-enhancements/filter-sort-check";
 export { imageInfoHighlight } from "./site-enhancements/image-info-highlight";

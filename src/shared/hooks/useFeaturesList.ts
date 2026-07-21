@@ -19,10 +19,6 @@ export function useFeaturesList() {
     "userScriptPanel.seo.enabled",
     false,
   );
-  const [selectHelperEnable, setSelectHelperEnable] = useStoredFlag(
-    "userScriptPanel.selectHelper.enabled",
-    false,
-  );
   const [disableInvolveoWidget, setDisableInvolveoWidget] = useStoredFlag(
     "userScriptPanel.widgets.involveo.disabled",
     false,
@@ -34,7 +30,6 @@ export function useFeaturesList() {
 
   return {
     sortHighlightEnable,
-    selectHelperEnable,
     filterSortCheckEnable,
     styles: [
       {
@@ -74,13 +69,6 @@ export function useFeaturesList() {
         description: "Показывает seo_sort и выделяет `> 5000`",
         enabled: sortHighlightEnable,
         onToggle: setSortHighlightEnable,
-      },
-      {
-        id: "selectHelper",
-        title: "Поиск по select",
-        description: "Добавляет кнопку поиска рядом с select'ами свойств товара",
-        enabled: selectHelperEnable,
-        onToggle: setSelectHelperEnable,
       },
       {
         id: "filterSortCheck",
