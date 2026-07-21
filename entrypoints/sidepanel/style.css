@@ -115,3 +115,62 @@ small {
   accent-color: #0284c7;
   cursor: pointer;
 }
+
+.template-tools-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.template-tools-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.template-tools-summary strong {
+  color: #171717;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-tools-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.template-tools-actions button {
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 10px;
+}
+
+.template-tools-actions button:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.template-tools-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.template-tools-file {
+  display: none;
+}
+
+.template-tools-status {
+  color: #475569;
+}
