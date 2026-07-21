@@ -6,6 +6,7 @@ import {
   propertySorter,
   sectionFilterSearch,
   sectionSorter,
+  componentParamsVisibility,
   selectHelper,
   sortHighlight,
 } from "../features";
@@ -87,15 +88,12 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
     sortHighlight.stop();
   }
 
-  if (settings.selectHelperEnabled) {
-    selectHelper.injectButtons();
-  } else {
-    selectHelper.removeButtons();
-  }
+  selectHelper.injectButtons();
 
   propertySorter.start();
   sectionSorter.start();
   sectionFilterSearch.start();
+  componentParamsVisibility.start();
   productMassEditor.start();
 
   if (settings.filterSortCheckEnabled) {
