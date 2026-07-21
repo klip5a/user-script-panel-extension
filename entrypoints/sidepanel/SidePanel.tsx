@@ -12,6 +12,7 @@ import {
   setExtensionSetting,
   subscribeToExtensionSettings,
 } from "../../src/settings/storage";
+import { PropertyTemplateTransfer } from "./PropertyTemplateTransfer";
 
 function ToggleRow({
   item,
@@ -109,6 +110,8 @@ export function SidePanel() {
         settings={settings}
         onToggle={updateBooleanSetting}
       />
+
+      <PropertyTemplateTransfer />
     </main>
   );
 }

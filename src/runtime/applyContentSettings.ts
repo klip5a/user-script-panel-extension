@@ -1,8 +1,10 @@
 import {
   filterSortCheck,
+  gridSectionDropdownSearch,
   imageInfoHighlight,
   productArticleHighlight,
   productMassEditor,
+  propertyTemplates,
   propertySorter,
   sectionFilterSearch,
   sectionSorter,
@@ -93,7 +95,9 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
   propertySorter.start();
   sectionSorter.start();
   sectionFilterSearch.start();
+  gridSectionDropdownSearch.start();
   componentParamsVisibility.start();
+  propertyTemplates.start();
   productMassEditor.start();
 
   if (settings.filterSortCheckEnabled) {

@@ -241,9 +241,39 @@ export class SelectHelper {
   selectOption(selectElement: HTMLSelectElement, value: string): void {
     selectElement.value = value;
 
-    // Триггерим событие change для совместимости с React
-    const event = new Event("change", { bubbles: true });
-    selectElement.dispatchEvent(event);
+    selectElement.dispatchEvent(new Event("input", { bubbles: true }));
+    selectElement.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  /**
+   * Заполняет связанное поле [NAME] названием выбранного свойства без завершающего кода.
+   */
+  private fillPropertyName(
+    selectElement: HTMLSelectElement,
+    option: SelectOption,
+  ): void {
+    if (!option.value || option.value === "-") return;
+
+    const selectName = selectElement.name;
+    if (!selectName.endsWith("[VALUE]")) return;
+
+    const inputName = `${selectName.slice(0, -"[VALUE]".length)}[NAME]`;
+    const scope: ParentNode = selectElement.form ?? selectElement.ownerDocument;
+    const nameInput = scope.querySelector<HTMLInputElement>(
+      `input[name="${CSS.escape(inputName)}"]`,
+    );
+    if (!nameInput) return;
+
+    const normalizedText = option.text.replace(/\s+/g, " ").trim();
+    const codeSuffix = `(${option.value})`;
+    const propertyName = normalizedText.endsWith(codeSuffix)
+      ? normalizedText.slice(0, -codeSuffix.length).trim()
+      : normalizedText;
+    if (!propertyName) return;
+
+    nameInput.value = propertyName;
+    nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    nameInput.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   /**
@@ -551,6 +581,7 @@ export class SelectHelper {
 
         item.addEventListener("click", () => {
           this.selectOption(select, opt.value);
+          this.fillPropertyName(select, opt);
           this.closePopup();
         });
 
