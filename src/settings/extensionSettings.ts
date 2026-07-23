@@ -2,6 +2,7 @@ export type ExtensionSettingKey =
   | "sortHighlightEnabled"
   | "filterSortCheckEnabled"
   | "imageInfoHighlightEnabled"
+  | "catalogEmptyPropertiesPanelVisible"
   | "hideSocialWidget"
   | "hideBitrixWidgets"
   | "hideCallbackButtons"
@@ -11,6 +12,7 @@ export type ExtensionSettings = {
   sortHighlightEnabled: boolean;
   filterSortCheckEnabled: boolean;
   imageInfoHighlightEnabled: boolean;
+  catalogEmptyPropertiesPanelVisible: boolean;
   hideSocialWidget: boolean;
   hideBitrixWidgets: boolean;
   hideCallbackButtons: boolean;
@@ -31,6 +33,7 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   sortHighlightEnabled: false,
   filterSortCheckEnabled: false,
   imageInfoHighlightEnabled: false,
+  catalogEmptyPropertiesPanelVisible: true,
   hideSocialWidget: false,
   hideBitrixWidgets: false,
   hideCallbackButtons: false,
@@ -52,6 +55,11 @@ export const ENHANCEMENT_SETTINGS: SettingItem[] = [
     key: "imageInfoHighlightEnabled",
     title: "Информация о картинках",
     description: "Показывает размер полного изображения в каталоге и карточке товара, вес файла догружает при наведении."
+  },
+  {
+    key: "catalogEmptyPropertiesPanelVisible",
+    title: "Панель пустых свойств",
+    description: "Показывает справа навигацию по незаполненным характеристикам таблицы."
   }
 ];
 
