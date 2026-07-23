@@ -1,4 +1,5 @@
 import {
+  catalogEmptyPropertiesAudit,
   filterSortCheck,
   gridSectionDropdownSearch,
   imageInfoHighlight,
@@ -96,6 +97,8 @@ export function applyDeferredSettings(settings: ExtensionSettings) {
   sectionSorter.start();
   sectionFilterSearch.start();
   gridSectionDropdownSearch.start();
+  catalogEmptyPropertiesAudit.start();
+  catalogEmptyPropertiesAudit.setPanelVisible(settings.catalogEmptyPropertiesPanelVisible);
   componentParamsVisibility.start();
   propertyTemplates.start();
   productMassEditor.start();

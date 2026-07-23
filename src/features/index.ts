@@ -7,6 +7,10 @@ export {
   GridSectionDropdownSearch,
   gridSectionDropdownSearch,
 } from "./site-enhancements/grid-section-dropdown-search";
+export {
+  CatalogEmptyPropertiesAudit,
+  catalogEmptyPropertiesAudit,
+} from "./site-enhancements/catalog-empty-properties-audit";
 export { componentParamsVisibility } from "./site-enhancements/component-params-visibility";
 export { propertyTemplates } from "./site-enhancements/property-templates";
 export { productMassEditor } from "./site-enhancements/product-mass-editor";
