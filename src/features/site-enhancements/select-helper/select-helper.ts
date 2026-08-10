@@ -14,6 +14,11 @@ declare global {
   }
 }
 
+type InjectedButtonRecord = {
+  button: HTMLButtonElement;
+  select: HTMLSelectElement;
+};
+
 /** Стилизация для инъецированных элементов */
 const INJECTED_STYLES_ID = "select-helper-injected-styles";
 const INJECTED_STYLES = `
@@ -132,12 +137,14 @@ const INJECTED_STYLES = `
  */
 export class SelectHelper {
   private readonly defaultMinOptions = 5;
-  private injectedButtons: Map<string, HTMLElement> = new Map();
+  private injectedButtons: Map<string, InjectedButtonRecord> = new Map();
   private activePopup: HTMLElement | null = null;
   private stylesInjected = false;
   private observer: MutationObserver | null = null;
   private scanOptions: SelectScanOptions | undefined;
   private scheduledInjectId: number | null = null;
+  private scheduledReconcileId: number | null = null;
+  private pendingSelects = new Set<HTMLSelectElement>();
 
   /**
    * Сканирует страницу и возвращает список найденных select'ов
@@ -342,7 +349,10 @@ export class SelectHelper {
    */
   private injectStyles(): void {
     if (this.stylesInjected) return;
-    if (document.getElementById(INJECTED_STYLES_ID)) return;
+    if (document.getElementById(INJECTED_STYLES_ID)) {
+      this.stylesInjected = true;
+      return;
+    }
 
     const style = document.createElement("style");
     style.id = INJECTED_STYLES_ID;
@@ -358,6 +368,7 @@ export class SelectHelper {
     this.scanOptions = options;
     this.injectStyles();
     this.removeButtons(); // Сначала убираем старые
+    this.startObserver();
 
     this.scheduledInjectId = scheduleIdleTask(() => {
       this.scheduledInjectId = null;
@@ -369,22 +380,30 @@ export class SelectHelper {
     const selects = this.scan(options);
 
     selects.forEach((info) => {
-      this.injectButtonForSelect(info.id);
+      const select = this.getSelectElement(info.id);
+      if (select) this.injectButtonForSelect(select);
     });
-
-    // Запускаем наблюдение за новыми select'ами
-    this.startObserver();
   }
 
   /**
    * Инъецирует кнопку поиска для одного select
    */
-  private injectButtonForSelect(selectId: string): void {
-    // Проверяем, что кнопка ещё не добавлена
-    if (this.injectedButtons.has(selectId)) return;
+  private injectButtonForSelect(select: HTMLSelectElement): void {
+    const selectId = this.getEligibleSelectId(select);
+    if (!selectId || !select.isConnected) return;
 
-    const select = this.getSelectElement(selectId);
-    if (!select) return;
+    const existing = this.injectedButtons.get(selectId);
+    if (existing) {
+      const wrapper = existing.button.closest(".select-helper-wrapper");
+      const isCurrentButton =
+        existing.button.isConnected &&
+        existing.select === select &&
+        wrapper?.contains(select) === true;
+      if (isCurrentButton) return;
+
+      existing.button.remove();
+      this.injectedButtons.delete(selectId);
+    }
 
     // Оборачиваем select в wrapper если ещё не обёрнут
     let wrapper = select.parentElement?.closest(".select-helper-wrapper");
@@ -420,7 +439,18 @@ export class SelectHelper {
     });
 
     wrapper.appendChild(btn);
-    this.injectedButtons.set(selectId, btn);
+    this.injectedButtons.set(selectId, { button: btn, select });
+  }
+
+  private getEligibleSelectId(select: HTMLSelectElement): string | null {
+    const name = select.getAttribute("name");
+    if (!name) return null;
+
+    const pattern = this.scanOptions?.namePattern ?? DEFAULT_SELECT_PATTERN;
+    const minOptions = this.scanOptions?.minOptions ?? this.defaultMinOptions;
+    if (!name.match(pattern) || select.options.length < minOptions) return null;
+
+    return name;
   }
 
   /**
@@ -431,12 +461,17 @@ export class SelectHelper {
       cancelIdleTask(this.scheduledInjectId);
       this.scheduledInjectId = null;
     }
+    if (this.scheduledReconcileId !== null) {
+      window.clearTimeout(this.scheduledReconcileId);
+      this.scheduledReconcileId = null;
+    }
+    this.pendingSelects.clear();
 
     this.closePopup();
     this.stopObserver(); // Останавливаем наблюдение
 
-    this.injectedButtons.forEach((btn) => {
-      btn.remove();
+    this.injectedButtons.forEach(({ button }) => {
+      button.remove();
     });
     this.injectedButtons.clear();
 
@@ -457,35 +492,20 @@ export class SelectHelper {
     if (this.observer) return; // Уже запущен
 
     this.observer = new MutationObserver((mutations) => {
+      let shouldPrune = false;
+
       for (const mutation of mutations) {
         if (mutation.type !== "childList") continue;
+        shouldPrune ||= mutation.removedNodes.length > 0;
 
+        this.collectSelectCandidates(mutation.target);
         for (const node of mutation.addedNodes) {
-          // Проверяем, является ли добавленный узел элементом
-          if (!(node instanceof HTMLElement)) continue;
-
-          // Ищем все select внутри добавленного элемента
-          const selects =
-            node.tagName === "SELECT"
-              ? [node as HTMLSelectElement]
-              : Array.from(node.querySelectorAll<HTMLSelectElement>("select"));
-
-          for (const select of selects) {
-            const name = select.getAttribute("name");
-            if (!name) continue;
-
-            // Проверяем, соответствует ли select нашим критериям
-            const pattern = this.scanOptions?.namePattern ?? DEFAULT_SELECT_PATTERN;
-            const minOptions = this.scanOptions?.minOptions ?? this.defaultMinOptions;
-
-            const match = name.match(pattern);
-            if (!match) continue;
-            if (select.options.length < minOptions) continue;
-
-            // Добавляем кнопку для нового select
-            this.injectButtonForSelect(name);
-          }
+          this.collectSelectCandidates(node);
         }
+      }
+
+      if (shouldPrune || this.pendingSelects.size > 0) {
+        this.scheduleReconcile();
       }
     });
 
@@ -493,6 +513,45 @@ export class SelectHelper {
       childList: true,
       subtree: true,
     });
+  }
+
+  private collectSelectCandidates(node: Node): void {
+    if (!(node instanceof Element)) return;
+
+    const closestSelect =
+      node instanceof HTMLSelectElement ? node : node.closest<HTMLSelectElement>("select");
+    if (closestSelect) this.pendingSelects.add(closestSelect);
+
+    node.querySelectorAll<HTMLSelectElement>("select").forEach((select) => {
+      this.pendingSelects.add(select);
+    });
+  }
+
+  private scheduleReconcile(): void {
+    if (this.scheduledReconcileId !== null) return;
+
+    this.scheduledReconcileId = window.setTimeout(() => {
+      this.scheduledReconcileId = null;
+      this.reconcileButtons();
+    }, 80);
+  }
+
+  private reconcileButtons(): void {
+    this.injectedButtons.forEach((record, selectId) => {
+      const wrapper = record.button.closest(".select-helper-wrapper");
+      const isCurrentButton =
+        record.button.isConnected &&
+        record.select.isConnected &&
+        wrapper?.contains(record.select) === true;
+      if (isCurrentButton) return;
+
+      record.button.remove();
+      this.injectedButtons.delete(selectId);
+    });
+
+    const candidates = Array.from(this.pendingSelects);
+    this.pendingSelects.clear();
+    candidates.forEach((select) => this.injectButtonForSelect(select));
   }
 
   /**

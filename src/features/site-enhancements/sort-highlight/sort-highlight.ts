@@ -4,11 +4,31 @@ import {
   type IdleDeadlineLike,
   scheduleIdleTask,
 } from "../../../shared";
+import {
+  analyzeSeoSortSequence,
+  type SeoSortAnalysis,
+  type SeoSortReason,
+} from "./model/analyzeSeoSortSequence";
 
 type RowEnhancement = {
   row: HTMLElement;
-  sortValue: number;
-  isDuplicate: boolean;
+  analysis: SeoSortAnalysis;
+};
+
+type SortValueReadResult = {
+  hasAttribute: boolean;
+  value: number | null;
+};
+
+const REASON_LABELS: Record<SeoSortReason, string> = {
+  normal: "Последовательность в порядке",
+  missing: "Пустое значение",
+  duplicate: "Дубликат",
+  skipped: "Пропущены позиции",
+  "range-change": "Смена диапазона или шага",
+  irregular: "Нерегулярный шаг — проверьте значение",
+  outlier: "Возможный выброс",
+  order: "Нарушен порядок сортировки",
 };
 
 class SortHighlight {
@@ -18,9 +38,6 @@ class SortHighlight {
   private scheduledBatchId: number | null = null;
   private pendingEnhancements: RowEnhancement[] = [];
 
-  private sortMap: Map<number, HTMLElement[]> = new Map();
-
-  private readonly SORT_THRESHOLD = 5000;
   private readonly ROW_BATCH_SIZE = 30;
   private readonly SORT_ATTRIBUTE_NAMES = ["data-sort", "data-seo-sort", "data-seo_sort"];
   private debouncedProcessAllRows: () => void;
@@ -66,7 +83,6 @@ class SortHighlight {
     this.cancelScheduledWork();
     this.pendingEnhancements = [];
     this.cleanup();
-    this.sortMap.clear();
   }
 
   private initObservers() {
@@ -87,28 +103,34 @@ class SortHighlight {
     const doc = this.getDocument();
     if (!doc) return;
 
-    const rows = doc.querySelectorAll<HTMLElement>(".table-view__item.item");
-    this.sortMap.clear();
-
-    rows.forEach((row) => {
-      const sortValue = this.getSortValue(row);
-      if (sortValue === null) return;
-
-      if (!this.sortMap.has(sortValue)) {
-        this.sortMap.set(sortValue, []);
-      }
-      this.sortMap.get(sortValue)!.push(row);
-    });
-
+    const rows = Array.from(doc.querySelectorAll<HTMLElement>(".table-view__item.item"));
+    let sortableGroup: Array<{ row: HTMLElement; value: number | null }> = [];
     this.pendingEnhancements = [];
 
-    this.sortMap.forEach((elements, sortValue) => {
-      const isDuplicate = elements.length > 1;
+    const flushSortableGroup = () => {
+      if (sortableGroup.length === 0) return;
 
-      elements.forEach((row) => {
-        this.pendingEnhancements.push({ row, sortValue, isDuplicate });
+      const analyses = analyzeSeoSortSequence(sortableGroup.map((item) => item.value));
+      sortableGroup.forEach((item, index) => {
+        this.pendingEnhancements.push({
+          row: item.row,
+          analysis: analyses[index] ?? { value: null, status: "error", reason: "missing" },
+        });
       });
+      sortableGroup = [];
+    };
+
+    rows.forEach((row) => {
+      const sortValue = this.readSortValue(row);
+      if (!sortValue.hasAttribute) {
+        flushSortableGroup();
+        this.cleanupRow(row);
+        return;
+      }
+
+      sortableGroup.push({ row, value: sortValue.value });
     });
+    flushSortableGroup();
 
     this.scheduleEnhanceBatch();
   }
@@ -144,7 +166,7 @@ class SortHighlight {
     ) {
       const item = this.pendingEnhancements.shift();
       if (!item) continue;
-      this.enhanceRow(item.row, item.sortValue, item.isDuplicate);
+      this.enhanceRow(item.row, item.analysis);
       processedCount += 1;
     }
 
@@ -163,47 +185,46 @@ class SortHighlight {
     }
   }
 
-  private getSortValue(row: HTMLElement): number | null {
+  private readSortValue(row: HTMLElement): SortValueReadResult {
     for (const attributeName of this.SORT_ATTRIBUTE_NAMES) {
-      const value = row.getAttribute(attributeName);
-      if (value === null) continue;
+      if (!row.hasAttribute(attributeName)) continue;
 
-      const sortValue = Number.parseInt(value, 10);
-      if (Number.isFinite(sortValue)) {
-        return sortValue;
+      const normalizedValue = (row.getAttribute(attributeName) ?? "").trim();
+      if (!normalizedValue) return { hasAttribute: true, value: null };
+
+      const sortValue = Number(normalizedValue);
+      if (Number.isInteger(sortValue)) {
+        return { hasAttribute: true, value: sortValue };
       }
+
+      return { hasAttribute: true, value: null };
     }
 
-    return null;
+    return { hasAttribute: false, value: null };
   }
 
-  private enhanceRow(row: HTMLElement, sortValue: number, isDuplicate: boolean) {
+  private enhanceRow(row: HTMLElement, analysis: SeoSortAnalysis) {
     const doc = this.getDocument();
     if (!doc) return;
-
-    const isSuspicious = sortValue > this.SORT_THRESHOLD;
 
     let borderColor = "#34d399";
     let bgColor = "";
     let badgeColor = "#059669";
     let badgeBg = "#d1fae5";
     let badgeBorder = "#6ee7b7";
-    let statusText = "OK";
 
-    if (isSuspicious) {
+    if (analysis.status === "error") {
       borderColor = "#f87171";
       bgColor = "rgba(254, 226, 226, 0.3)";
       badgeColor = "#dc2626";
       badgeBg = "#fee2e2";
       badgeBorder = "#fca5a5";
-      statusText = "HIGH SORT";
-    } else if (isDuplicate) {
+    } else if (analysis.status === "warning") {
       borderColor = "#facc15";
       bgColor = "rgba(254, 243, 199, 0.4)";
       badgeColor = "#b45309";
       badgeBg = "#fef3c7";
       badgeBorder = "#fcd34d";
-      statusText = "DUPLICATE";
     }
 
     row.style.boxShadow = `inset 4px 0 0 ${borderColor}`;
@@ -234,12 +255,14 @@ class SortHighlight {
     }
 
     if (badge) {
-      badge.textContent = `seo_sort:${sortValue}${isDuplicate ? " ⚠" : ""}`;
+      const displayValue = analysis.value ?? "пусто";
+      badge.textContent = `seo_sort:${displayValue}${analysis.status === "normal" ? "" : " ⚠"}`;
 
       Object.assign(badge.style, {
         fontSize: "9px",
         fontWeight: "600",
         fontFamily: "system-ui, sans-serif",
+        fontVariantNumeric: "tabular-nums",
         color: badgeColor,
         backgroundColor: badgeBg,
         padding: "1px 4px",
@@ -248,7 +271,8 @@ class SortHighlight {
         whiteSpace: "nowrap",
       });
 
-      badge.title = `seo_sort: ${sortValue}${isDuplicate ? " (duplicate)" : ""} | ${statusText}`;
+      const stepText = analysis.expectedStep ? ` | обычный шаг: ${analysis.expectedStep}` : "";
+      badge.title = `seo_sort: ${displayValue} | ${REASON_LABELS[analysis.reason]}${stepText}`;
     }
   }
 
@@ -256,20 +280,23 @@ class SortHighlight {
     const doc = this.getDocument();
     if (!doc) return;
 
-    doc.querySelectorAll(".table-view__item.item").forEach((row) => {
-      const el = row as HTMLElement;
-      el.style.boxShadow = "";
-      el.style.backgroundColor = "";
+    doc.querySelectorAll<HTMLElement>(".table-view__item.item").forEach((row) => {
+      this.cleanupRow(row);
     });
+  }
 
-    // Восстанавливаем codeProduct из wrapper и удаляем wrapper
-    doc.querySelectorAll(".sort-highlight-wrapper").forEach((wrapper) => {
-      const codeProduct = wrapper.querySelector(".codeProduct");
-      if (codeProduct) {
-        wrapper.insertAdjacentElement("afterend", codeProduct);
-      }
-      wrapper.remove();
-    });
+  private cleanupRow(row: HTMLElement) {
+    row.style.boxShadow = "";
+    row.style.backgroundColor = "";
+
+    const wrapper = row.querySelector<HTMLElement>(".sort-highlight-wrapper");
+    if (!wrapper) return;
+
+    const codeProduct = wrapper.querySelector<HTMLElement>(".codeProduct");
+    if (codeProduct) {
+      wrapper.insertAdjacentElement("afterend", codeProduct);
+    }
+    wrapper.remove();
   }
 }
 

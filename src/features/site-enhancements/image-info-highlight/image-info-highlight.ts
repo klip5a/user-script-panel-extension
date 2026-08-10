@@ -5,10 +5,13 @@ import {
   scheduleIdleTask,
 } from "../../../shared";
 
-type ImageInfo = {
+type ImageLoadState = "idle" | "loaded" | "error";
+
+type ImageAssetInfo = {
   width: number;
   height: number;
   sizeText: string | null;
+  state: ImageLoadState;
 };
 
 type ImageDimensions = {
@@ -16,18 +19,50 @@ type ImageDimensions = {
   height: number;
 };
 
+type LoadedImageInfo = ImageDimensions & {
+  sizeText: string;
+};
+
+type ImageInfo = {
+  full: ImageAssetInfo | null;
+  site: ImageAssetInfo | null;
+  sameAsset: boolean;
+};
+
 class ImageInfoHighlight {
   private enabled = false;
   private mutationObserver: MutationObserver | null = null;
   private intersectionObserver: IntersectionObserver | null = null;
-  // Кэшируем вес по URL, чтобы повторные наведения на одинаковые картинки не делали новые HEAD-запросы.
-  private readonly sizeCache = new Map<string, string | null>();
-  // Кэшируем реальные размеры оригиналов; null означает, что размер уже пробовали получить, но не смогли.
-  private readonly dimensionsCache = new Map<string, ImageDimensions | null>();
+  // Кэшируем метаданные по точному URL; null означает, что файл уже пробовали получить, но не смогли.
+  private readonly imageInfoCache = new Map<string, LoadedImageInfo | null>();
+  // Один URL может встретиться в нескольких карточках, поэтому параллельные запросы объединяем.
+  private readonly pendingInfoRequests = new Map<string, Promise<void>>();
+  // Динамические галереи могут менять URL уже обработанного img без замены самого элемента.
+  private readonly refreshCallbacks = new WeakMap<HTMLImageElement, () => void>();
 
   private pendingImages: HTMLImageElement[] = [];
   private scheduledBatchId: number | null = null;
   private readonly IMAGE_BATCH_SIZE = 20;
+
+  private readonly FULL_IMAGE_ATTRIBUTES = [
+    "data-full",
+    "data-full-src",
+    "data-full-image",
+    "data-big",
+    "data-big-src",
+    "data-src-big",
+    "data-image-big",
+    "data-large",
+    "data-large-src",
+    "data-zoom",
+    "data-zoom-src",
+    "data-zoom-image",
+    "data-fancybox-href",
+  ] as const;
+
+  private readonly FULL_IMAGE_ATTRIBUTE_SELECTOR = this.FULL_IMAGE_ATTRIBUTES
+    .map((attribute) => `[${attribute}]`)
+    .join(",");
 
   // Целевые изображения: разделы каталога, карточки и галерея товара.
   private readonly IMAGE_SELECTOR = [
@@ -118,8 +153,24 @@ class ImageInfoHighlight {
         } else if (mutation.type === "attributes") {
           const target = mutation.target as HTMLElement;
           if (target.tagName === "IMG" && target.matches?.(this.IMAGE_SELECTOR)) {
-            // Если у картинки изменился src (сработал lazyload), отправляем на повторную проверку
-            this.intersectionObserver?.observe(target);
+            const image = target as HTMLImageElement;
+            const refresh = this.refreshCallbacks.get(image);
+            if (refresh) {
+              refresh();
+            } else {
+              this.intersectionObserver?.observe(image);
+            }
+          } else if (
+            target.tagName === "A" ||
+            target.matches?.(this.FULL_IMAGE_ATTRIBUTE_SELECTOR)
+          ) {
+            // Карусель может заменить href/data-full у существующего слайда.
+            const images = target.querySelectorAll<HTMLImageElement>(this.IMAGE_SELECTOR);
+            for (const image of images) {
+              const refresh = this.refreshCallbacks.get(image);
+              if (refresh) refresh();
+              else this.intersectionObserver?.observe(image);
+            }
           }
         }
       }
@@ -128,7 +179,15 @@ class ImageInfoHighlight {
       childList: true, 
       subtree: true,
       attributes: true,
-      attributeFilter: ["src", "data-src", "data-webp-src", "data-webp-data-src"]
+      attributeFilter: [
+        "src",
+        "srcset",
+        "href",
+        "data-src",
+        "data-webp-src",
+        "data-webp-data-src",
+        ...this.FULL_IMAGE_ATTRIBUTES,
+      ]
     });
 
     // Первоначальный поиск картинок
@@ -175,8 +234,8 @@ class ImageInfoHighlight {
     // Бейдж позиционируется относительно родителя картинки, поэтому родитель обязателен.
     if (!image.parentElement) return false;
 
-    // Без URL оригинала фича не сможет показать полезные данные.
-    return Boolean(this.getOriginalImageUrl(image));
+    // Достаточно хотя бы одного файла: отсутствие Full не должно скрывать параметры Site.
+    return Boolean(this.getFullImageUrl(image) || this.getSiteImageUrl(image));
   }
 
   private enhanceImage(image: HTMLImageElement): void {
@@ -190,63 +249,108 @@ class ImageInfoHighlight {
     // Бейдж вставляется рядом с картинкой внутри текущего контейнера.
     const badge = doc.createElement("span");
     badge.className = "image-info-highlight-badge";
-    badge.textContent = this.formatBadgeText(this.getImageInfo(image));
     image.insertAdjacentElement("afterend", badge);
 
+    let showDetails = false;
+
     const syncBadge = () => {
-      // syncBadge переиспользуется после lazyload img и после загрузки данных оригинала.
-      badge.textContent = this.formatBadgeText(this.getImageInfo(image));
-      badge.title = this.formatTooltipText(image, this.getImageInfo(image));
+      // syncBadge переиспользуется после lazyload и после загрузки метаданных Full/Site.
+      const info = this.getImageInfo(image);
+      badge.textContent = this.formatBadgeText(image, info, showDetails);
+      badge.title = this.formatBadgeText(image, info, true);
     };
 
+    const refreshInfo = () => {
+      syncBadge();
+      void Promise.all([
+        this.loadImageInfo(this.getFullImageUrl(image)),
+        this.loadImageInfo(this.getSiteImageUrl(image)),
+      ]).then(syncBadge);
+    };
+
+    this.refreshCallbacks.set(image, refreshInfo);
+
     // После lazyload src/currentSrc могут поменяться, поэтому обновляем подпись.
-    image.addEventListener("load", syncBadge, { passive: true });
+    image.addEventListener("load", refreshInfo, { passive: true });
     container.addEventListener("mouseenter", () => {
-      // Вес и неизвестные размеры догружаются только по наведению, чтобы не создавать лишний трафик.
-      void this.loadOriginalImageInfo(image).then(syncBadge);
+      showDetails = true;
+      refreshInfo();
+    });
+    container.addEventListener("mouseleave", () => {
+      showDetails = false;
+      syncBadge();
     });
 
-    syncBadge();
+    // Оба точных размера нужны до наведения; Site обычно уже доступен в HTTP-кэше страницы.
+    refreshInfo();
   }
 
   private getImageInfo(image: HTMLImageElement): ImageInfo {
-    const url = this.getOriginalImageUrl(image);
-    // Приоритет: кэш после реальной загрузки, затем размер из Bitrix URL, затем неизвестное состояние.
-    const cachedDimensions = url ? this.dimensionsCache.get(url) : null;
-    const parsedDimensions = url ? this.parseDimensionsFromUrl(url) : null;
-    const dimensions = cachedDimensions ?? parsedDimensions;
+    const fullUrl = this.getFullImageUrl(image);
+    const siteUrl = this.getSiteImageUrl(image);
 
     return {
-      width: dimensions?.width ?? 0,
-      height: dimensions?.height ?? 0,
-      sizeText: url ? this.sizeCache.get(url) ?? null : null,
+      full: this.getCachedImageInfo(fullUrl),
+      site: this.getCachedImageInfo(siteUrl, {
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      }),
+      sameAsset: Boolean(fullUrl && siteUrl && fullUrl === siteUrl),
     };
   }
 
-  private formatBadgeText(info: ImageInfo): string {
-    // В компактном состоянии показываем минимум: размер оригинала, затем вес после hover.
-    const dimensionsText = info.width && info.height ? `${info.width}x${info.height}` : "full ...";
-    return info.sizeText ? `${dimensionsText} / ${info.sizeText}` : dimensionsText;
-  }
+  private getCachedImageInfo(
+    url: string | null,
+    fallbackDimensions: ImageDimensions = { width: 0, height: 0 },
+  ): ImageAssetInfo | null {
+    if (!url) return null;
 
-  private formatTooltipText(image: HTMLImageElement, info: ImageInfo): string {
-    // Tooltip хранит и отображаемый размер, и данные полного файла для быстрой сверки.
-    const parts = [
-      `Rendered: ${image.width}x${image.height}`,
-      `Full: ${info.width && info.height ? `${info.width}x${info.height}` : "hover to load"}`,
-    ];
-
-    if (info.sizeText) {
-      parts.push(`Weight: ${info.sizeText}`);
-    } else {
-      parts.push("Weight: hover to load");
+    if (!this.imageInfoCache.has(url)) {
+      return { ...fallbackDimensions, sizeText: null, state: "idle" };
     }
 
-    return parts.join("\n");
+    const cachedInfo = this.imageInfoCache.get(url);
+    if (!cachedInfo) {
+      return { ...fallbackDimensions, sizeText: null, state: "error" };
+    }
+
+    return { ...cachedInfo, state: "loaded" };
   }
 
-  private getOriginalImageUrl(image: HTMLImageElement): string | null {
-    // В Fancybox и галереях товара ссылка вокруг превью обычно ведет на полный файл.
+  private formatBadgeText(image: HTMLImageElement, info: ImageInfo, showDetails: boolean): string {
+    const lines: string[] = [];
+
+    if (info.full && info.site && info.sameAsset) {
+      lines.push(this.formatAssetLine("Full/Site", info.site, showDetails));
+    } else {
+      if (info.full) lines.push(this.formatAssetLine("Full", info.full, showDetails));
+      if (info.site) lines.push(this.formatAssetLine("Site", info.site, showDetails));
+    }
+
+    if (lines.length === 0) lines.push("Image: unavailable");
+
+    if (showDetails) {
+      lines.push(`Rendered: ${image.width}×${image.height}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  private formatAssetLine(label: string, info: ImageAssetInfo, showWeight: boolean): string {
+    const dimensionsText = info.width && info.height
+      ? `${info.width}×${info.height}`
+      : info.state === "error"
+        ? "unavailable"
+        : "...";
+
+    if (!showWeight) return `${label}: ${dimensionsText}`;
+
+    const weightText = info.sizeText ?? (info.state === "error" ? "unavailable" : "...");
+    return `${label}: ${dimensionsText} / ${weightText}`;
+  }
+
+  private getFullImageUrl(image: HTMLImageElement): string | null {
+    // В Fancybox и галереях точный href ведёт к файлу, который откроется в полном просмотре.
     const imageLink = image.closest<HTMLAnchorElement>("a[href]");
     const href = imageLink?.getAttribute("href");
 
@@ -254,24 +358,22 @@ class ImageInfoHighlight {
       return this.normalizeUrl(href);
     }
 
-    // Для карточек без ссылки на полный файл сначала берем не-webp источник из data-атрибутов.
-    const candidates = [
-      image.dataset.webpDataSrc,
-      image.getAttribute("data-webp-data-src"),
-      image.dataset.webpSrc,
-      image.getAttribute("data-webp-src"),
-      image.dataset.src,
-      image.getAttribute("data-src"),
-      image.currentSrc,
-      image.src,
-    ];
+    // Другие галереи могут хранить полноразмерный файл в явно названном data-атрибуте.
+    const attributeOwner = image.closest<HTMLElement>(this.FULL_IMAGE_ATTRIBUTE_SELECTOR);
+    const candidateOwners = [image, imageLink, attributeOwner].filter(
+      (owner, index, owners): owner is HTMLElement => Boolean(owner) && owners.indexOf(owner) === index,
+    );
 
-    const src = candidates.find((candidate) => candidate && this.isImageAssetUrl(candidate));
+    for (const owner of candidateOwners) {
+      for (const attribute of this.FULL_IMAGE_ATTRIBUTES) {
+        const candidate = owner.getAttribute(attribute);
+        if (candidate && this.isImageAssetUrl(candidate)) {
+          return this.normalizeUrl(candidate);
+        }
+      }
+    }
 
-    if (!src) return null;
-
-    // Если это Bitrix resize_cache, пробуем восстановить путь к исходному /upload/... файлу.
-    return this.getUploadOriginalUrl(src) ?? this.normalizeUrl(src);
+    return null;
   }
 
   private normalizeUrl(url: string): string {
@@ -281,6 +383,14 @@ class ImageInfoHighlight {
     } catch {
       return url;
     }
+  }
+
+  private getSiteImageUrl(image: HTMLImageElement): string | null {
+    // currentSrc учитывает выбор браузера из picture/srcset и фактически загруженный WebP/resize.
+    const src = image.currentSrc || image.src;
+    if (!src || !this.isImageAssetUrl(src)) return null;
+
+    return this.normalizeUrl(src);
   }
 
   private isImageAssetUrl(url: string): boolean {
@@ -293,96 +403,101 @@ class ImageInfoHighlight {
     }
   }
 
-  private parseDimensionsFromUrl(url: string): ImageDimensions | null {
-    // В Bitrix resize_cache размер часто зашит в сегмент пути: /1000_500_hash/file.jpg.
-    const match = url.match(/\/(\d{2,5})_(\d{2,5})(?:_[^/]*)?\//);
-    if (!match) return null;
-
-    return {
-      width: Number(match[1]),
-      height: Number(match[2]),
-    };
-  }
-
-  private getUploadOriginalUrl(url: string): string | null {
-    // Преобразуем Bitrix resize/webp URL обратно в путь к оригинальному upload-файлу.
-    const normalizedUrl = this.normalizeUrl(url);
-    const urlWithoutWebpWrapper = normalizedUrl.replace(
-      /\/upload\/delight\.webpconverter\/upload\//,
-      "/upload/",
-    );
-    const withoutQuery = urlWithoutWebpWrapper.split("?")[0].replace(/\.webp$/i, "");
-    const match = withoutQuery.match(
-      /^(.*\/upload)\/resize_cache\/(iblock|uf)\/([^/]+)\/[^/]+\/([^/]+)$/i,
-    );
-
-    if (!match) return null;
-
-    return `${match[1]}/${match[2]}/${match[3]}/${match[4]}`;
-  }
-
-  private async loadOriginalImageInfo(image: HTMLImageElement): Promise<void> {
-    const url = this.getOriginalImageUrl(image);
+  private async loadImageInfo(url: string | null): Promise<void> {
     if (!url) return;
 
-    // Размер и вес независимы, поэтому загружаем их параллельно.
-    await Promise.all([this.loadImageDimensions(url), this.loadImageSize(url)]);
-  }
+    if (this.imageInfoCache.has(url)) return;
 
-  private async loadImageDimensions(url: string): Promise<void> {
-    // Если URL уже проверен, не повторяем даже неудачную попытку.
-    if (this.dimensionsCache.has(url)) return;
-
-    const parsedDimensions = this.parseDimensionsFromUrl(url);
-    if (parsedDimensions) {
-      // Для resize_cache не нужно грузить файл: размер уже есть в пути.
-      this.dimensionsCache.set(url, parsedDimensions);
+    const pendingRequest = this.pendingInfoRequests.get(url);
+    if (pendingRequest) {
+      await pendingRequest;
       return;
     }
 
-    // Полное изображение грузим только при наведении, если размер нельзя прочитать из URL.
-    await new Promise<void>((resolve) => {
-      const probe = new Image();
-      probe.onload = () => {
-        this.dimensionsCache.set(url, {
-          width: probe.naturalWidth,
-          height: probe.naturalHeight,
-        });
-        resolve();
-      };
-      probe.onerror = () => {
-        this.dimensionsCache.set(url, null);
-        resolve();
-      };
-      probe.src = url;
-    });
+    const request = this.fetchImageInfo(url)
+      .then((info) => {
+        this.imageInfoCache.set(url, info);
+      })
+      .catch(() => {
+        this.imageInfoCache.set(url, null);
+      })
+      .finally(() => {
+        this.pendingInfoRequests.delete(url);
+      });
+
+    this.pendingInfoRequests.set(url, request);
+    await request;
   }
 
-  private async loadImageSize(url: string): Promise<void> {
-    // null в кэше используется как маркер "запрос уже был, но вес недоступен".
-    if (this.sizeCache.has(url)) return;
-
-    this.sizeCache.set(url, null);
-
-    try {
-      // HEAD получает вес файла без скачивания тела картинки, если сервер это поддерживает.
-      const response = await fetch(url, { method: "HEAD", cache: "force-cache" });
-      const length = response.headers.get("content-length");
-      this.sizeCache.set(url, length ? this.formatBytes(Number(length)) : null);
-    } catch {
-      this.sizeCache.set(url, null);
+  private async fetchImageInfo(url: string): Promise<LoadedImageInfo> {
+    // Один GET даёт фактический вес файла и Blob для чтения его естественных размеров.
+    const response = await fetch(url, { method: "GET", cache: "force-cache" });
+    if (!response.ok) {
+      throw new Error(`Image request failed with status ${response.status}`);
     }
+
+    const blob = await response.blob();
+    const sizeText = this.formatBytes(blob.size);
+    if (!sizeText) {
+      throw new Error("Image is empty");
+    }
+
+    const dimensions = await this.decodeImageDimensions(blob);
+    return { ...dimensions, sizeText };
+  }
+
+  private async decodeImageDimensions(blob: Blob): Promise<ImageDimensions> {
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+
+      try {
+        if (!bitmap.width || !bitmap.height) {
+          throw new Error("Decoded image has no dimensions");
+        }
+
+        return { width: bitmap.width, height: bitmap.height };
+      } finally {
+        bitmap.close();
+      }
+    }
+
+    return await new Promise<ImageDimensions>((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const probe = new Image();
+      const cleanup = () => URL.revokeObjectURL(objectUrl);
+
+      probe.onload = () => {
+        const dimensions = {
+          width: probe.naturalWidth,
+          height: probe.naturalHeight,
+        };
+        cleanup();
+
+        if (!dimensions.width || !dimensions.height) {
+          reject(new Error("Decoded image has no dimensions"));
+          return;
+        }
+
+        resolve(dimensions);
+      };
+      probe.onerror = () => {
+        cleanup();
+        reject(new Error("Image could not be decoded"));
+      };
+      probe.src = objectUrl;
+    });
   }
 
   private formatBytes(bytes: number): string | null {
     // Формат делаем коротким, потому что бейдж находится поверх картинки.
     if (!Number.isFinite(bytes) || bytes <= 0) return null;
-    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1000) return `${bytes} B`;
 
-    const kilobytes = bytes / 1024;
-    if (kilobytes < 1024) return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
+    // Chrome DevTools использует десятичные kB/MB, поэтому 174905 байт отображаются как 175 KB.
+    const kilobytes = bytes / 1000;
+    if (kilobytes < 1000) return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
 
-    const megabytes = kilobytes / 1024;
+    const megabytes = kilobytes / 1000;
     return `${megabytes.toFixed(megabytes >= 10 ? 1 : 2)} MB`;
   }
 
@@ -423,7 +538,7 @@ class ImageInfoHighlight {
         color: #ecfdf5 !important;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18) !important;
         font: 700 10px/1.15 system-ui, sans-serif !important;
-        white-space: nowrap !important;
+        white-space: pre !important;
         pointer-events: none !important;
       }
       .image-info-highlight-wrap:hover {
