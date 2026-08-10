@@ -45,20 +45,41 @@ function SettingsSection({
   items,
   settings,
   onToggle,
+  collapsible = false,
+  defaultCollapsed = false,
 }: {
   title: string;
   description: string;
   items: SettingItem[];
   settings: ExtensionSettings;
   onToggle: (key: BooleanSettingKey, value: boolean) => void;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const listId = `settings-list-${title.toLocaleLowerCase("ru-RU").replace(/\s+/g, "-")}`;
+
   return (
-    <section className="settings-section">
+    <section className="settings-section" data-collapsible={collapsible ? "true" : undefined}>
       <div className="section-heading">
-        <h2>{title}</h2>
+        <div className="section-title-row">
+          <h2>{title}</h2>
+          {collapsible ? (
+            <button
+              type="button"
+              className="section-collapse"
+              aria-expanded={!collapsed}
+              aria-controls={listId}
+              onClick={() => setCollapsed((value) => !value)}
+            >
+              {collapsed ? "Показать" : "Скрыть"}
+              <span aria-hidden="true">{collapsed ? "▾" : "▴"}</span>
+            </button>
+          ) : null}
+        </div>
         <p>{description}</p>
       </div>
-      <div className="settings-list">
+      <div className="settings-list" id={listId} hidden={collapsible && collapsed}>
         {items.map((item) => (
           <ToggleRow
             key={item.key}
@@ -96,8 +117,8 @@ export function SidePanel() {
       </header>
 
       <SettingsSection
-        title="Улучшения"
-        description="Инструменты, которые меняют или дополняют рабочие страницы Bitrix."
+        title="Инструменты"
+        description="Удобства для ежедневной работы с каталогом и админкой Bitrix."
         items={ENHANCEMENT_SETTINGS}
         settings={settings}
         onToggle={updateBooleanSetting}
@@ -109,6 +130,8 @@ export function SidePanel() {
         items={STYLE_SETTINGS}
         settings={settings}
         onToggle={updateBooleanSetting}
+        collapsible
+        defaultCollapsed
       />
 
       <PropertyTemplateTransfer />

@@ -74,6 +74,38 @@ small {
   gap: 3px;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.section-collapse:hover {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.section-collapse:focus-visible {
+  outline: 3px solid #7dd3fc;
+  outline-offset: 2px;
+}
+
 .settings-list {
   display: grid;
   gap: 1px;
@@ -81,6 +113,10 @@ small {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #e5e7eb;
+}
+
+.settings-list[hidden] {
+  display: none;
 }
 
 .setting-row {

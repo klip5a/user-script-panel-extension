@@ -31,6 +31,14 @@ const HIDE_BITRIX_WIDGETS_CSS = `
   }
 `;
 
+const HIDE_AI_CHAT_CSS = `
+  #cnc1-ai-btn,
+  #cnc1-ai-chat,
+  #cnc1-ai-chat-overlay {
+    display: none !important;
+  }
+`;
+
 const HIDE_CALLBACK_BUTTONS_CSS = `
   .wrap_cont .opener {
     display: none !important;
@@ -71,6 +79,11 @@ export function applyCriticalSettings(settings: ExtensionSettings) {
     "cnc1-userpanel-hide-bitrix-widgets",
     HIDE_BITRIX_WIDGETS_CSS,
     settings.hideBitrixWidgets
+  );
+  setInjectedStyle(
+    "cnc1-userpanel-hide-ai-chat",
+    HIDE_AI_CHAT_CSS,
+    settings.hideAiChat
   );
   setInjectedStyle(
     "cnc1-userpanel-hide-callback-buttons",

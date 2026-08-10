@@ -11,6 +11,10 @@ export function useFeaturesList() {
     "userScriptPanel.widgets.bitrix.disabled",
     false,
   );
+  const [disableAiChat, setDisableAiChat] = useStoredFlag(
+    "userScriptPanel.widgets.aiChat.disabled",
+    false,
+  );
   const [disableCallbackButtons, setDisableCallbackButtons] = useStoredFlag(
     "userScriptPanel.widgets.callback.disabled",
     false,
@@ -47,6 +51,13 @@ export function useFeaturesList() {
         onToggle: setDisableBitrixWidgets,
       },
       {
+        id: "hideAiChat",
+        title: "Скрыть ИИ-чат CNC1",
+        description: "Отключение кнопки и окна ИИ-ассистента CNC1",
+        enabled: disableAiChat,
+        onToggle: setDisableAiChat,
+      },
+      {
         id: "hideCallbackButtons",
         title: "Скрыть кнопки связи",
         description: "Отключение кнопок 'Заказать звонок' и 'Задать вопрос'",
@@ -66,7 +77,7 @@ export function useFeaturesList() {
       {
         id: "sort-Highlight",
         title: "Подсветка seo_sort",
-        description: "Показывает seo_sort и выделяет `> 5000`",
+        description: "Показывает seo_sort и выделяет пропуски, дубли и выбросы",
         enabled: sortHighlightEnable,
         onToggle: setSortHighlightEnable,
       },

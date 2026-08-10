@@ -5,6 +5,7 @@ export type ExtensionSettingKey =
   | "catalogEmptyPropertiesPanelVisible"
   | "hideSocialWidget"
   | "hideBitrixWidgets"
+  | "hideAiChat"
   | "hideCallbackButtons"
   | "hideInvolveoWidget";
 
@@ -15,6 +16,7 @@ export type ExtensionSettings = {
   catalogEmptyPropertiesPanelVisible: boolean;
   hideSocialWidget: boolean;
   hideBitrixWidgets: boolean;
+  hideAiChat: boolean;
   hideCallbackButtons: boolean;
   hideInvolveoWidget: boolean;
 };
@@ -33,9 +35,10 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   sortHighlightEnabled: false,
   filterSortCheckEnabled: false,
   imageInfoHighlightEnabled: false,
-  catalogEmptyPropertiesPanelVisible: true,
+  catalogEmptyPropertiesPanelVisible: false,
   hideSocialWidget: false,
   hideBitrixWidgets: false,
+  hideAiChat: false,
   hideCallbackButtons: false,
   hideInvolveoWidget: false
 };
@@ -44,7 +47,7 @@ export const ENHANCEMENT_SETTINGS: SettingItem[] = [
   {
     key: "sortHighlightEnabled",
     title: "Подсветка seo_sort",
-    description: "Показывает seo_sort, дубли и подозрительно большие значения."
+    description: "Показывает seo_sort и выделяет пропуски, дубли, смены диапазона и выбросы."
   },
   {
     key: "filterSortCheckEnabled",
@@ -73,6 +76,11 @@ export const STYLE_SETTINGS: SettingItem[] = [
     key: "hideBitrixWidgets",
     title: "Скрыть CRM-виджеты",
     description: "Убирает мешающие Bitrix24/CRM кнопки."
+  },
+  {
+    key: "hideAiChat",
+    title: "Скрыть ИИ-чат CNC1",
+    description: "Убирает кнопку, окно и затемнение ИИ-ассистента CNC1."
   },
   {
     key: "hideCallbackButtons",
