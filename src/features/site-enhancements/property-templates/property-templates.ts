@@ -1,16 +1,32 @@
 import { debounce } from "../../../shared";
+import { getCatalogPropertyHeaders } from "../catalog-empty-properties-audit/model/analyzeCatalogTables";
 import {
   deletePropertyTemplate,
   getPropertyTemplateStore,
   upsertPropertyTemplate,
 } from "./model/storage";
 import { downloadPropertyTemplateStore } from "./model/download";
+import {
+  getSectionHeaderKey,
+  getSectionPropertyHeaders,
+  saveSectionPropertyHeaders,
+} from "./model/section-header-storage";
 import type { PropertyTemplate, PropertyTemplateItem } from "./model/types";
 
 type PropertyBlockContext = {
   container: HTMLTableElement;
   prefix: string;
   addButton: HTMLInputElement;
+};
+
+type HeaderAutofillSkippedItem = {
+  header: string;
+  reason: string;
+};
+
+type HeaderAutofillResult = {
+  added: number;
+  skipped: HeaderAutofillSkippedItem[];
 };
 
 const PROPERTY_SELECT_PATTERN = /^(UF_PROPS_PRODUCT(?:_DETAIL)?_T)\[(\d+)]\[VALUE]$/;
@@ -109,6 +125,7 @@ const STYLES = `
 class PropertyTemplates {
   private enabled = false;
   private observer: MutationObserver | null = null;
+  private lastSavedHeaderSignature = "";
   private readonly scanDebounced = debounce(() => this.scan(), 200);
 
   start(): void {
@@ -140,6 +157,8 @@ class PropertyTemplates {
 
   private scan(): void {
     if (!this.enabled) return;
+
+    void this.saveCatalogHeadersFromCurrentPage();
 
     const seen = new Set<HTMLTableElement>();
     document.querySelectorAll<HTMLSelectElement>('select[name*="UF_PROPS_PRODUCT"]').forEach((select) => {
@@ -190,8 +209,35 @@ class PropertyTemplates {
     insertButton.textContent = "Вставить шаблон";
     insertButton.addEventListener("click", () => void this.openTemplatePicker(context));
 
-    toolbar.append(createButton, insertButton);
+    const sectionHeaderButton = document.createElement("button");
+    sectionHeaderButton.type = "button";
+    sectionHeaderButton.textContent = "Подставить из шапки";
+    sectionHeaderButton.addEventListener("click", async () => {
+      sectionHeaderButton.disabled = true;
+      try {
+        await this.insertFromSectionHeaders(context);
+      } finally {
+        sectionHeaderButton.disabled = false;
+      }
+    });
+
+    toolbar.append(createButton, insertButton, sectionHeaderButton);
     context.addButton.insertAdjacentElement("afterend", toolbar);
+  }
+
+  private async saveCatalogHeadersFromCurrentPage(): Promise<void> {
+    const headers = getCatalogPropertyHeaders(document);
+    if (headers.length === 0) return;
+
+    const signature = `${getSectionHeaderKey(document)}\n${headers.join("\n")}`;
+    if (signature === this.lastSavedHeaderSignature) return;
+    this.lastSavedHeaderSignature = signature;
+
+    try {
+      await saveSectionPropertyHeaders(headers, document);
+    } catch (error) {
+      console.warn("[PropertyTemplates] Не удалось сохранить заголовки свойств раздела:", error);
+    }
   }
 
   private collectItems(context: PropertyBlockContext): PropertyTemplateItem[] {
@@ -399,6 +445,128 @@ class PropertyTemplates {
     }
 
     return { added, skipped };
+  }
+
+  private async insertFromSectionHeaders(context: PropertyBlockContext): Promise<void> {
+    const doc = context.container.ownerDocument;
+    const view = doc.defaultView ?? window;
+
+    let headers: string[];
+    try {
+      headers = await getSectionPropertyHeaders(doc);
+    } catch (error) {
+      console.warn("[PropertyTemplates] Не удалось прочитать заголовки свойств раздела:", error);
+      view.alert("Не удалось прочитать сохранённую шапку раздела.");
+      return;
+    }
+
+    if (headers.length === 0) {
+      view.alert("Для этого раздела нет сохранённой шапки. Сначала открой страницу раздела с таблицей.");
+      return;
+    }
+
+    const result = await this.insertHeaderProperties(context, headers);
+    view.alert(this.formatHeaderAutofillResult(result));
+  }
+
+  private async insertHeaderProperties(
+    context: PropertyBlockContext,
+    headers: string[],
+  ): Promise<HeaderAutofillResult> {
+    let added = 0;
+    const skipped: HeaderAutofillSkippedItem[] = [];
+
+    for (const header of headers) {
+      const referenceSelect = this.getPropertySelects(context)[0]?.select;
+      if (!referenceSelect) {
+        skipped.push({ header, reason: "не найден список свойств" });
+        continue;
+      }
+
+      const option = this.findOptionByPropertyTitle(referenceSelect, header);
+      if (!option) {
+        skipped.push({ header, reason: "нет точного совпадения в списке свойств" });
+        continue;
+      }
+
+      const target = await this.getEmptyOrCreatedSelect(context);
+      if (!target) {
+        skipped.push({ header, reason: "не удалось найти или создать пустую строку" });
+        continue;
+      }
+
+      const match = target.name.match(PROPERTY_SELECT_PATTERN);
+      if (!match) {
+        skipped.push({ header, reason: "у строки свойства некорректное имя поля" });
+        continue;
+      }
+
+      const index = Number.parseInt(match[2], 10);
+      this.setControlValue(target, option.value);
+      const nameInput = this.findInput(context.container, context.prefix, index, "NAME");
+      if (nameInput) this.setControlValue(nameInput, header);
+      added += 1;
+    }
+
+    return { added, skipped };
+  }
+
+  private formatHeaderAutofillResult(result: HeaderAutofillResult): string {
+    const lines = [
+      `Подстановка из шапки: добавлено ${result.added}, пропущено ${result.skipped.length}.`,
+    ];
+
+    if (result.skipped.length > 0) {
+      lines.push(
+        "",
+        "Не добавились:",
+        ...result.skipped.map((item) => `- ${item.header}: ${item.reason}.`),
+      );
+    }
+
+    return lines.join("\n");
+  }
+
+  private async getEmptyOrCreatedSelect(
+    context: PropertyBlockContext,
+  ): Promise<HTMLSelectElement | null> {
+    const empty = this.getPropertySelects(context)
+      .map(({ select }) => select)
+      .find((select) => {
+        const value = select.value.trim();
+        return value === "" || value === "-";
+      });
+    if (empty) return empty;
+
+    const existingNames = new Set(this.getPropertySelects(context).map(({ select }) => select.name));
+    context.addButton.click();
+    return this.waitForNewSelect(context, existingNames);
+  }
+
+  private findOptionByPropertyTitle(
+    select: HTMLSelectElement,
+    title: string,
+  ): HTMLOptionElement | null {
+    const expected = this.normalizePropertyTitle(title);
+    return (
+      Array.from(select.options).find((option) => {
+        if (!option.value || option.value === "-") return false;
+        return this.normalizePropertyTitle(this.getOptionPropertyTitle(option)) === expected;
+      }) ?? null
+    );
+  }
+
+  private getOptionPropertyTitle(option: HTMLOptionElement): string {
+    const text = option.textContent ?? "";
+    const normalizedText = text.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+    const codeSuffix = `(${option.value})`;
+    return normalizedText.endsWith(codeSuffix)
+      ? normalizedText.slice(0, -codeSuffix.length).trim()
+      : normalizedText;
+  }
+
+  private normalizePropertyTitle(value: string): string {
+    return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU");
   }
 
   private waitForNewSelect(

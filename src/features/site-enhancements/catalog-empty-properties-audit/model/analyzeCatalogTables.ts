@@ -5,6 +5,11 @@ export type CatalogAuditResults = {
   validTables: number;
 };
 
+export type CatalogPropertyHeader = {
+  title: string;
+  column: number;
+};
+
 type LogicalCell = {
   cell: HTMLTableCellElement;
   start: number;
@@ -16,6 +21,10 @@ const PRODUCT_ROW_SELECTOR =
 
 function normalizeText(value: string): string {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU");
+}
+
+function normalizeDisplayText(value: string): string {
+  return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function getLogicalCells(row: HTMLTableRowElement): LogicalCell[] {
@@ -44,8 +53,16 @@ function findUniqueBoundary(
 
 function findHeaderBounds(
   table: HTMLTableElement,
-): { propertyColumns: number[] } | null {
-  const headerRows = Array.from(table.tHead?.rows ?? []);
+): { propertyColumns: number[]; propertyHeaders: CatalogPropertyHeader[] } | null {
+  const headerRows = Array.from(
+    new Set([
+      ...Array.from(table.tHead?.rows ?? []),
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>("tr.mainHead")),
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>("tr")).filter((row) =>
+        row.querySelector("th"),
+      ),
+    ]),
+  );
 
   for (const row of headerRows) {
     const cells = getLogicalCells(row);
@@ -58,7 +75,12 @@ function findHeaderBounds(
       { length: price.start - article.end },
       (_, index) => article.end + index,
     );
-    if (propertyColumns.length > 0) return { propertyColumns };
+    const propertyHeaders = cells
+      .filter(({ start, end }) => start >= article.end && end <= price.start)
+      .map(({ cell, start }) => ({ title: normalizeDisplayText(cell.textContent ?? ""), column: start }))
+      .filter((header) => header.title.length > 0);
+
+    if (propertyColumns.length > 0) return { propertyColumns, propertyHeaders };
   }
 
   return null;
@@ -124,4 +146,23 @@ export function analyzeCatalogTables(doc: Document): CatalogAuditResults {
   });
 
   return { emptyCells, rowsWithEmpty, allEmptyRows, validTables };
+}
+
+export function getCatalogPropertyHeaders(doc: Document): string[] {
+  const headers: string[] = [];
+  const seen = new Set<string>();
+
+  doc.querySelectorAll<HTMLTableElement>("table.catalog_table").forEach((table) => {
+    const bounds = findHeaderBounds(table);
+    if (!bounds) return;
+
+    bounds.propertyHeaders.forEach((header) => {
+      const key = normalizeText(header.title);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      headers.push(header.title);
+    });
+  });
+
+  return headers;
 }
