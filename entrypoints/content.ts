@@ -57,7 +57,12 @@ async function initContentRuntime() {
 }
 
 export default defineContentScript({
-  matches: ["https://cnc1.ru/*", "https://www.cnc1.ru/*"],
+  matches: [
+    "https://cnc1.ru/*",
+    "https://www.cnc1.ru/*",
+    "https://xn--80akihldccewegghem.xn--p1ai/*",
+    "https://technowood.ru/*"
+  ],
   runAt: "document_start",
   main() {
     // В content.ts мы используем document_start, чтобы успеть вставить CSS до рендера.
