@@ -2,15 +2,19 @@ import type {
   ProductFieldDescriptor,
   ProductMassEditorDraft,
   ProductMassEditorFieldState,
+  ProductTargetSource,
 } from "../types";
 
 type ProductMassEditorAppProps = {
   open: boolean;
+  targetSource: ProductTargetSource;
+  selectedRowCount: number;
   codes: string;
   fields: ProductFieldDescriptor[];
   drafts: ProductMassEditorDraft[];
   onClose: () => void;
   onApply: () => void;
+  onTargetSourceChange: (value: ProductTargetSource) => void;
   onCodesChange: (value: string) => void;
   onDraftActiveChange: (draftKey: string, active: boolean) => void;
   onFieldModeChange: (draftKey: string, mode: string) => void;
@@ -87,7 +91,7 @@ function renderFieldEditor(
           style={inputBaseStyles}
         >
           {modeOptions.map((option) => (
-            <option value={option.value}>{option.label}</option>
+            <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
       </label>
@@ -121,6 +125,7 @@ function renderFieldEditor(
           >
             {field.options.map((option) => (
               <label
+                key={option.value}
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
@@ -173,6 +178,7 @@ function renderFieldEditor(
             ) : null}
             {state.linkedOptions.map((option) => (
               <label
+                key={option.value}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "16px minmax(0, 1fr)",
@@ -271,29 +277,114 @@ export function ProductMassEditorApp(props: ProductMassEditorAppProps) {
                 background: "#eef6f2",
               }}
             >
-              <div style={{ fontSize: "15px", fontWeight: "700", color: "#17352f" }}>Коды товаров</div>
-              <div style={{ fontSize: "12px", lineHeight: "1.45", color: "#5f746d" }}>
-                Вставляй по одному коду в строку. Таблица справа отфильтруется по совпадениям.
+              <div style={{ fontSize: "15px", fontWeight: "700", color: "#17352f" }}>
+                Какие товары редактировать
               </div>
-              <textarea
-                value={props.codes}
-                onInput={(event) => props.onCodesChange((event.currentTarget as HTMLTextAreaElement).value)}
-                placeholder={"00104461\n00104462"}
+              <fieldset
                 style={{
-                  width: "100%",
-                  height: "100%",
-                  resize: "none",
-                  borderRadius: "12px",
-                  border: "1px solid #bfd2ca",
-                  padding: "14px",
-                  fontSize: "14px",
-                  lineHeight: "1.5",
-                  background: "#fff",
-                  color: "#17352f",
-                  outline: "none",
-                  boxSizing: "border-box",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  gap: "8px",
+                  margin: "0",
+                  padding: "0",
+                  border: "0",
                 }}
-              />
+              >
+                <legend style={{ position: "absolute", clipPath: "inset(50%)", width: "1px", height: "1px" }}>
+                  Источник списка товаров
+                </legend>
+                {([
+                  {
+                    value: "selected" as const,
+                    label: `Выбранные в таблице (${props.selectedRowCount})`,
+                  },
+                  { value: "codes" as const, label: "По кодам товаров" },
+                ]).map((option) => {
+                  const active = props.targetSource === option.value;
+                  return (
+                    <label
+                      key={option.value}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "18px minmax(0, 1fr)",
+                        alignItems: "center",
+                        gap: "8px",
+                        minHeight: "44px",
+                        padding: "8px 10px",
+                        borderRadius: "10px",
+                        border: `1px solid ${active ? "#0f766e" : "#c9d8d1"}`,
+                        background: active ? "#dcf7ef" : "#f8fbf9",
+                        color: "#17352f",
+                        fontSize: "12px",
+                        fontWeight: active ? "700" : "600",
+                        cursor: "pointer",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="product-mass-target-source"
+                        value={option.value}
+                        checked={active}
+                        onInput={(event) =>
+                          props.onTargetSourceChange(
+                            (event.currentTarget as HTMLInputElement).value as ProductTargetSource,
+                          )
+                        }
+                        style={{ accentColor: "#0f766e" }}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+              {props.targetSource === "codes" ? (
+                <textarea
+                  value={props.codes}
+                  onInput={(event) => props.onCodesChange((event.currentTarget as HTMLTextAreaElement).value)}
+                  placeholder={"00104461\n00104462"}
+                  aria-label="Коды товаров, по одному в строке"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    resize: "vertical",
+                    minHeight: "160px",
+                    borderRadius: "12px",
+                    border: "1px solid #bfd2ca",
+                    padding: "14px",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    background: "#fff",
+                    color: "#17352f",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    alignContent: "center",
+                    gap: "8px",
+                    minHeight: "160px",
+                    borderRadius: "12px",
+                    border: "1px solid #c8ddd4",
+                    background: "#f8fcfa",
+                    color: "#17352f",
+                    textAlign: "center",
+                    padding: "20px",
+                  }}
+                >
+                  <strong style={{ fontSize: "34px", lineHeight: "1", fontVariantNumeric: "tabular-nums" }}>
+                    {props.selectedRowCount}
+                  </strong>
+                  <span style={{ fontSize: "13px", fontWeight: "700" }}>товаров выбрано для редактирования</span>
+                  <span style={{ maxWidth: "300px", fontSize: "12px", lineHeight: "1.45", color: "#60756d" }}>
+                    Будут изменены только отмеченные строки, открытые в режиме редактирования Bitrix.
+                  </span>
+                </div>
+              )}
               <div
                 style={{
                   fontSize: "12px",
@@ -305,7 +396,9 @@ export function ProductMassEditorApp(props: ProductMassEditorAppProps) {
                   border: "1px solid #dce7e1",
                 }}
               >
-                Вставь коды товаров по одному в строку, затем выбери свойство справа и укажи, что с ним сделать.
+                {props.targetSource === "codes"
+                  ? "Вставь коды по одному в строку, затем выбери свойство справа."
+                  : "Проверь число выбранных строк, затем выбери свойство справа и действие для него."}
               </div>
             </section>
 

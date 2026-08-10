@@ -1,6 +1,11 @@
 import { render } from "preact";
 import { debounce, getDocument } from "../../../../shared";
 import { ProductMassEditorApp } from "../ui/ProductMassEditorApp";
+import { resolveMultiValueSelection } from "./multiValueSelection";
+import {
+  isSelectedEditableProductRow,
+  type ProductTargetSource,
+} from "./productTargeting";
 import type {
   ProductFieldDescriptor,
   ProductMassEditorDraft,
@@ -17,6 +22,7 @@ class ProductMassEditor {
   private uiHost: HTMLDivElement | null = null;
   private activeContext: ProductGridContext | null = null;
   private isOpen = false;
+  private targetSource: ProductTargetSource = "selected";
   private codes = "";
   private drafts = new Map<string, { key: string; fieldId: string; active: boolean }>();
   private fieldModes = new Map<string, string>();
@@ -28,6 +34,7 @@ class ProductMassEditor {
 
   private readonly PRODUCT_MASS_EDIT_BTN_ID = "product_mass_edit_btn";
   private readonly PRODUCT_MASS_EDIT_BTN_HOST_ID = "product_mass_edit_btn_host";
+  private readonly PRIMARY_OFFERS_FIELD_ID = "PROPERTY_12069";
 
   constructor() {
     this.debouncedCheckAndInject = debounce(this.checkAndInject.bind(this), 350);
@@ -169,6 +176,7 @@ class ProductMassEditor {
   private open(context: ProductGridContext): void {
     this.activeContext = context;
     this.isOpen = true;
+    this.targetSource = "selected";
 
     const fields = this.collectProductActionFields(context.table);
     if (fields.length === 0) return;
@@ -190,16 +198,23 @@ class ProductMassEditor {
     const context = this.activeContext ?? this.findProductGridContext(doc);
     const fields = context ? this.collectProductActionFields(context.table) : [];
     const drafts = fields.length > 0 ? this.getDraftStates(fields) : [];
+    const selectedRowCount = context ? this.getSelectedProductRows(context).length : 0;
 
     render(
       <ProductMassEditorApp
         open={this.isOpen}
+        targetSource={this.targetSource}
+        selectedRowCount={selectedRowCount}
         codes={this.codes}
         fields={fields}
         drafts={drafts}
         onClose={() => this.close()}
         onApply={() => {
           if (context) this.applyProductMassEdit(context);
+        }}
+        onTargetSourceChange={(value) => {
+          this.targetSource = value;
+          this.renderUi();
         }}
         onCodesChange={(value) => {
           this.codes = value;
@@ -368,10 +383,21 @@ class ProductMassEditor {
       result.push(descriptor);
     }
 
-    return result.map((field) => ({
-      ...field,
-      displayTitle: (titleUsage.get(field.title) ?? 0) > 1 ? `${field.title} (${field.id})` : field.title,
-    }));
+    return result
+      .map((field) => ({
+        ...field,
+        displayTitle:
+          field.id === this.PRIMARY_OFFERS_FIELD_ID
+            ? `${field.title} — основное (${field.id})`
+            : (titleUsage.get(field.title) ?? 0) > 1
+              ? `${field.title} (${field.id})`
+              : field.title,
+      }))
+      .sort((left, right) => {
+        if (left.id === this.PRIMARY_OFFERS_FIELD_ID) return -1;
+        if (right.id === this.PRIMARY_OFFERS_FIELD_ID) return 1;
+        return 0;
+      });
   }
 
   private buildProductFieldDescriptor(
@@ -491,6 +517,36 @@ class ProductMassEditor {
 
     const codes = this.parseProductCodes(this.codes);
     return codes.size > 0 ? rows.filter((row) => codes.has(row.code)) : rows;
+  }
+
+  private getSelectedProductRows(context: ProductGridContext): Array<{ element: HTMLTableRowElement; code: string }> {
+    return this.getProductEditableRows(context.table)
+      .filter((row) => {
+        const checkbox = row.querySelector<HTMLInputElement>(
+          "td.main-grid-cell-checkbox input.main-grid-row-checkbox:not(.main-grid-check-all)",
+        );
+
+        return isSelectedEditableProductRow({
+          isInlineEditable: row.classList.contains("main-grid-row-edit"),
+          isHidden: row.hidden,
+          isTemplate: row.dataset.id === "template_0",
+          checkboxChecked: checkbox?.checked ?? false,
+          hasCheckedRowClass: row.classList.contains("main-grid-row-checked"),
+        });
+      })
+      .map((row) => {
+        const codeCell = row.querySelector<HTMLElement>('td[data-column-id="PROPERTY_12343"]');
+        return {
+          element: row,
+          code: codeCell?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        };
+      });
+  }
+
+  private getTargetProductRows(context: ProductGridContext): Array<{ element: HTMLTableRowElement; code: string }> {
+    return this.targetSource === "selected"
+      ? this.getSelectedProductRows(context)
+      : this.getMatchedProductRows(context);
   }
 
   private async resolveLinkedFieldOptions(field: ProductFieldDescriptor): Promise<ProductFieldOption[]> {
@@ -620,9 +676,13 @@ class ProductMassEditor {
       );
     if (configuredDrafts.length === 0) return;
 
-    const rows = this.getMatchedProductRows(context);
+    const rows = this.getTargetProductRows(context);
     if (rows.length === 0) {
-      this.showNotification(context.table.ownerDocument, "Нет найденных товаров для применения", "warning");
+      const message =
+        this.targetSource === "selected"
+          ? "Нет выбранных товаров в режиме редактирования"
+          : "Нет найденных товаров для применения";
+      this.showNotification(context.table.ownerDocument, message, "warning");
       return;
     }
 
@@ -634,7 +694,16 @@ class ProductMassEditor {
     });
 
     if (changedControls === 0) {
-      this.showNotification(context.table.ownerDocument, "Не удалось применить изменения к выбранным полям", "warning");
+      const isRemoveOnly = configuredDrafts.every(
+        ({ draft, field }) => this.getFieldMode(draft.key, field) === "remove",
+      );
+      this.showNotification(
+        context.table.ownerDocument,
+        isRemoveOnly
+          ? "Выбранные значения уже отсутствуют у этих товаров"
+          : "Новые значения совпадают с текущими — изменений нет",
+        "warning",
+      );
       return;
     }
 
@@ -682,19 +751,15 @@ class ProductMassEditor {
     const mode = this.getFieldMode(draftKey, field);
     const selected = this.getSelectedValues(draftKey);
     const checkboxes = Array.from(cell.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    const nextSelection = resolveMultiValueSelection(
+      checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value),
+      selected,
+      mode,
+    );
     let changed = 0;
 
     checkboxes.forEach((checkbox) => {
-      const shouldCheck =
-        mode === "clear"
-          ? false
-          : mode === "replace"
-            ? selected.has(checkbox.value)
-            : mode === "add"
-              ? checkbox.checked || selected.has(checkbox.value)
-              : selected.has(checkbox.value)
-                ? false
-                : checkbox.checked;
+      const shouldCheck = nextSelection.has(checkbox.value);
 
       if (checkbox.checked !== shouldCheck) {
         checkbox.checked = shouldCheck;
@@ -713,20 +778,18 @@ class ProductMassEditor {
     const select = cell.querySelector<HTMLSelectElement>("select");
     if (!select) return 0;
 
+    const nextSelection = resolveMultiValueSelection(
+      Array.from(select.selectedOptions)
+        .filter((option) => option.value)
+        .map((option) => option.value),
+      selected,
+      mode,
+    );
     let changed = 0;
     Array.from(select.options).forEach((option) => {
       if (!option.value) return;
 
-      const shouldSelect =
-        mode === "clear"
-          ? false
-          : mode === "replace"
-            ? selected.has(option.value)
-            : mode === "add"
-              ? option.selected || selected.has(option.value)
-              : selected.has(option.value)
-                ? false
-                : option.selected;
+      const shouldSelect = nextSelection.has(option.value);
 
       if (option.selected !== shouldSelect) {
         option.selected = shouldSelect;

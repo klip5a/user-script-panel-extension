@@ -5,4 +5,5 @@ export type {
   ProductGridContext,
   ProductMassEditorDraft,
   ProductMassEditorFieldState,
+  ProductTargetSource,
 } from "./model/types";

@@ -5,6 +5,8 @@ export interface ProductGridContext {
   controlPanelCell: HTMLElement | null;
 }
 
+export type { ProductTargetSource } from "./productTargeting";
+
 export type ProductFieldKind =
   | "text"
   | "checkbox-group"
