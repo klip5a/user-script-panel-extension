@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import {
   DEFAULT_EXTENSION_SETTINGS,
   ENHANCEMENT_SETTINGS,
@@ -9,7 +9,7 @@ import {
 } from "../../src/settings/extensionSettings";
 import {
   getExtensionSettings,
-  setExtensionSetting,
+  setExtensionSettings,
   subscribeToExtensionSettings,
 } from "../../src/settings/storage";
 import { PropertyTemplateTransfer } from "./PropertyTemplateTransfer";
@@ -95,15 +95,51 @@ function SettingsSection({
 
 export function SidePanel() {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_EXTENSION_SETTINGS);
+  // Счётчик записей защищает rollback от перетирания более нового успешного действия.
+  const writeVersionRef = useRef(0);
 
   useEffect(() => {
-    void getExtensionSettings().then(setSettings);
+    void getExtensionSettings()
+      .then(setSettings)
+      .catch(() => setSettings({ ...DEFAULT_EXTENSION_SETTINGS }));
     return subscribeToExtensionSettings(setSettings);
   }, []);
 
+  const persistSettings = (updates: Partial<ExtensionSettings>) => {
+    const version = ++writeVersionRef.current;
+    setSettings((current) => ({ ...current, ...updates }));
+
+    void setExtensionSettings(updates).catch(() => {
+      // Если за это время пользователь успел сделать новую запись, её завершение
+      // само приведёт UI к актуальному состоянию; откатываем только устаревший оптимизм.
+      if (writeVersionRef.current !== version) return;
+
+      void getExtensionSettings()
+        .then(setSettings)
+        .catch(() => setSettings({ ...DEFAULT_EXTENSION_SETTINGS }));
+    });
+  };
+
   const updateBooleanSetting = (key: BooleanSettingKey, value: boolean) => {
-    setSettings((current) => ({ ...current, [key]: value }));
-    void setExtensionSetting(key, value);
+    if (key === "catalogEmptyPropertiesPanelVisible" && value) {
+      const updates = {
+        catalogEmptyPropertiesHighlightEnabled: true,
+        catalogEmptyPropertiesPanelVisible: true,
+      };
+      persistSettings(updates);
+      return;
+    }
+
+    if (key === "catalogEmptyPropertiesHighlightEnabled" && !value) {
+      const updates = {
+        catalogEmptyPropertiesHighlightEnabled: false,
+        catalogEmptyPropertiesPanelVisible: false,
+      };
+      persistSettings(updates);
+      return;
+    }
+
+    persistSettings({ [key]: value });
   };
 
   return (

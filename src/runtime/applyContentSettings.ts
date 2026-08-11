@@ -14,6 +14,7 @@ import {
   sortHighlight,
 } from "../features";
 import type { ExtensionSettings } from "../settings/extensionSettings";
+import { FeatureRegistry } from "./featureRegistry";
 
 // CSS-правки держим рядом с runtime-логикой, потому что они включаются настройками без React UI.
 const HIDE_SOCIAL_WIDGET_CSS = `
@@ -97,38 +98,105 @@ export function applyCriticalSettings(settings: ExtensionSettings) {
   );
 }
 
+const contentFeatureRegistry = new FeatureRegistry([
+  {
+    name: "sortHighlight",
+    isEnabled: (settings) => settings.sortHighlightEnabled,
+    start: () => sortHighlight.start(),
+    stop: () => sortHighlight.stop(),
+  },
+  {
+    name: "selectHelper",
+    isEnabled: () => true,
+    start: () => selectHelper.injectButtons(),
+    stop: () => selectHelper.removeButtons(),
+    // Инжектирующая фича: как и раньше, сканирование повторяется при каждом применении.
+    apply: () => selectHelper.injectButtons(),
+  },
+  {
+    name: "propertySorter",
+    isEnabled: () => true,
+    start: () => propertySorter.start(),
+    stop: () => propertySorter.stop(),
+  },
+  {
+    name: "sectionSorter",
+    isEnabled: () => true,
+    start: () => sectionSorter.start(),
+    stop: () => sectionSorter.stop(),
+  },
+  {
+    name: "sectionFilterSearch",
+    isEnabled: () => true,
+    start: () => sectionFilterSearch.start(),
+    stop: () => sectionFilterSearch.stop(),
+  },
+  {
+    name: "gridSectionDropdownSearch",
+    isEnabled: () => true,
+    start: () => gridSectionDropdownSearch.start(),
+    stop: () => gridSectionDropdownSearch.stop(),
+  },
+  {
+    name: "catalogEmptyPropertiesAudit",
+    isEnabled: (settings) =>
+      settings.catalogEmptyPropertiesHighlightEnabled ||
+      settings.catalogEmptyPropertiesPanelVisible,
+    start: (settings) => {
+      catalogEmptyPropertiesAudit.start();
+      catalogEmptyPropertiesAudit.setPanelVisible(settings.catalogEmptyPropertiesPanelVisible);
+    },
+    stop: () => catalogEmptyPropertiesAudit.stop(),
+    // Видимость панели меняется независимо от highlight: переприменяем при каждом апдейте.
+    apply: (settings) => {
+      catalogEmptyPropertiesAudit.start();
+      catalogEmptyPropertiesAudit.setPanelVisible(settings.catalogEmptyPropertiesPanelVisible);
+    },
+  },
+  {
+    name: "componentParamsVisibility",
+    isEnabled: () => true,
+    start: () => componentParamsVisibility.start(),
+    stop: () => componentParamsVisibility.stop(),
+  },
+  {
+    name: "propertyTemplates",
+    isEnabled: () => true,
+    start: () => propertyTemplates.start(),
+    stop: () => propertyTemplates.stop(),
+  },
+  {
+    name: "productMassEditor",
+    isEnabled: () => true,
+    start: () => productMassEditor.start(),
+    stop: () => productMassEditor.stop(),
+  },
+  {
+    name: "filterSortCheck",
+    isEnabled: (settings) => settings.filterSortCheckEnabled,
+    start: () => filterSortCheck.start(),
+    stop: () => filterSortCheck.stop(),
+  },
+  {
+    name: "imageInfoHighlight",
+    isEnabled: (settings) => settings.imageInfoHighlightEnabled,
+    start: () => imageInfoHighlight.start(),
+    stop: () => imageInfoHighlight.stop(),
+  },
+  {
+    name: "productArticleHighlight",
+    isEnabled: () => true,
+    start: () => productArticleHighlight.start(),
+    stop: () => productArticleHighlight.stop(),
+  },
+]);
+
 export function applyDeferredSettings(settings: ExtensionSettings) {
-  if (settings.sortHighlightEnabled) {
-    sortHighlight.start();
-  } else {
-    sortHighlight.stop();
-  }
+  contentFeatureRegistry.apply(settings);
+}
 
-  selectHelper.injectButtons();
-
-  propertySorter.start();
-  sectionSorter.start();
-  sectionFilterSearch.start();
-  gridSectionDropdownSearch.start();
-  catalogEmptyPropertiesAudit.start();
-  catalogEmptyPropertiesAudit.setPanelVisible(settings.catalogEmptyPropertiesPanelVisible);
-  componentParamsVisibility.start();
-  propertyTemplates.start();
-  productMassEditor.start();
-
-  if (settings.filterSortCheckEnabled) {
-    filterSortCheck.start();
-  } else {
-    filterSortCheck.stop();
-  }
-
-  if (settings.imageInfoHighlightEnabled) {
-    imageInfoHighlight.start();
-  } else {
-    imageInfoHighlight.stop();
-  }
-
-  productArticleHighlight.start();
+export function stopContentFeatures(): void {
+  contentFeatureRegistry.stopAll();
 }
 
 export function applyContentSettings(settings: ExtensionSettings) {

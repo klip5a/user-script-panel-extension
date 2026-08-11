@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   manifest: {
     name: "CNC1 UserPanel",
-    version: "1.6.0",
+    version: "1.7.0",
     description: "Панель инструментов администратора для CNC1/Bitrix",
     permissions: ["storage", "activeTab", "scripting", "sidePanel"],
     host_permissions: [

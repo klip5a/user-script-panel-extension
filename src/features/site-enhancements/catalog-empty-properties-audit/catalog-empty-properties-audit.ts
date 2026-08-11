@@ -302,6 +302,7 @@ const STYLES = `
 
 export class CatalogEmptyPropertiesAudit {
   private enabled = false;
+  private lifecycleGeneration = 0;
   private panelVisible = true;
   private collapsed = false;
   private observer: MutationObserver | null = null;
@@ -322,6 +323,7 @@ export class CatalogEmptyPropertiesAudit {
   start(): void {
     if (this.enabled) return;
     this.enabled = true;
+    const generation = ++this.lifecycleGeneration;
 
     const doc = getDocument();
     if (!doc?.body) return;
@@ -342,7 +344,7 @@ export class CatalogEmptyPropertiesAudit {
     });
     doc.defaultView?.addEventListener("resize", this.handleViewportResize);
 
-    void this.loadPanelState();
+    void this.loadPanelState(generation);
     this.scan();
   }
 
@@ -354,6 +356,8 @@ export class CatalogEmptyPropertiesAudit {
   stop(): void {
     if (!this.enabled) return;
     this.enabled = false;
+    // Старый loadPanelState completion после stop/restart игнорируется.
+    this.lifecycleGeneration += 1;
     this.observer?.disconnect();
     this.observer = null;
     getDocument()?.defaultView?.removeEventListener("resize", this.handleViewportResize);
@@ -794,17 +798,20 @@ export class CatalogEmptyPropertiesAudit {
     this.activeTarget = null;
   }
 
-  private async loadPanelState(): Promise<void> {
+  private async loadPanelState(generation: number): Promise<void> {
     try {
       const stored = await chrome.storage.local.get({
         [COLLAPSED_STORAGE_KEY]: false,
         [POSITION_STORAGE_KEY]: null,
       });
+      if (generation !== this.lifecycleGeneration || !this.enabled) return;
+
       this.collapsed = stored[COLLAPSED_STORAGE_KEY] === true;
       const position = stored[POSITION_STORAGE_KEY] as unknown;
       this.panelPosition = this.isStoredPosition(position) ? position : null;
       this.updatePanel();
     } catch {
+      if (generation !== this.lifecycleGeneration || !this.enabled) return;
       this.collapsed = false;
       this.panelPosition = null;
     }

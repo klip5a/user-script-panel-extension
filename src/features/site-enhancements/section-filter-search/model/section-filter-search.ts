@@ -5,13 +5,31 @@ interface SectionOptionItem {
   VALUE: string;
 }
 
+type TrackedListener = {
+  target: EventTarget;
+  type: string;
+  listener: EventListenerOrEventListenerObject;
+  options?: boolean | AddEventListenerOptions;
+};
+
+type FieldState = {
+  field: HTMLElement;
+  helper: HTMLElement;
+  input: HTMLInputElement;
+  results: HTMLElement;
+  listeners: TrackedListener[];
+  cleanup: () => void;
+};
+
 class SectionFilterSearch {
   private enabled = false;
   private observer: MutationObserver | null = null;
+  private readonly states = new Map<HTMLElement, FieldState>();
   private readonly debouncedUpdate: () => void;
   private readonly styleId = "section-filter-search-styles";
   private readonly helperSelector = ".section-filter-search-helper";
   private readonly fieldSelector = '.main-ui-control-field[data-name="SECTION_ID"]';
+
   constructor() {
     this.debouncedUpdate = debounce(this.update.bind(this), 150);
   }
@@ -39,7 +57,10 @@ class SectionFilterSearch {
     if (!doc?.body) return;
 
     this.observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => mutation.addedNodes.length > 0)) {
+      const hasDomChange = mutations.some(
+        (mutation) => mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0,
+      );
+      if (hasDomChange) {
         this.debouncedUpdate();
       }
     });
@@ -53,15 +74,25 @@ class SectionFilterSearch {
     const doc = getDocument();
     if (!doc) return;
 
+    // При AJAX-замене поля или повторном start/stop вычищаем отсоединённые state'ы.
+    this.pruneDetachedStates();
+
     doc.querySelectorAll<HTMLElement>(this.fieldSelector).forEach((field) => {
       this.mountHelper(field);
     });
   }
 
-  private mountHelper(field: HTMLElement): void {
-    if (field.querySelector(this.helperSelector)) {
-      return;
+  private pruneDetachedStates(): void {
+    for (const [field, state] of Array.from(this.states)) {
+      if (!field.isConnected || !state.helper.isConnected) {
+        this.cleanupState(state);
+      }
     }
+  }
+
+  private mountHelper(field: HTMLElement): void {
+    if (this.states.has(field)) return;
+    if (field.querySelector(this.helperSelector)) return;
 
     const select = field.querySelector<HTMLElement>('.main-ui-select[data-name="SECTION_ID"]');
     if (!select) return;
@@ -87,6 +118,24 @@ class SectionFilterSearch {
     helper.append(input);
     select.insertAdjacentElement("afterend", helper);
     doc.body.appendChild(results);
+
+    const state: FieldState = {
+      field,
+      helper,
+      input,
+      results,
+      listeners: [],
+      cleanup: () => this.cleanupState(state),
+    };
+    const track = (
+      target: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ): void => {
+      target.addEventListener(type, listener, options);
+      state.listeners.push({ target, type, listener, options });
+    };
 
     let activeIndex = -1;
     let filteredItems: SectionOptionItem[] = [];
@@ -181,10 +230,11 @@ class SectionFilterSearch {
       openResults();
     };
 
-    input.addEventListener("input", renderResults);
-    input.addEventListener("focus", renderResults);
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    track(input, "input", renderResults);
+    track(input, "focus", renderResults);
+    track(input, "keydown", (event) => {
+      const keyboardEvent = event as KeyboardEvent;
+      if (keyboardEvent.key === "Escape") {
         closeResults();
         return;
       }
@@ -195,22 +245,22 @@ class SectionFilterSearch {
 
       const visibleCount = Math.min(filteredItems.length, 30);
 
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
+      if (keyboardEvent.key === "ArrowDown") {
+        keyboardEvent.preventDefault();
         activeIndex = Math.min(activeIndex + 1, visibleCount - 1);
         syncActiveItem();
         return;
       }
 
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
+      if (keyboardEvent.key === "ArrowUp") {
+        keyboardEvent.preventDefault();
         activeIndex = Math.max(activeIndex - 1, 0);
         syncActiveItem();
         return;
       }
 
-      if (event.key === "Enter") {
-        event.preventDefault();
+      if (keyboardEvent.key === "Enter") {
+        keyboardEvent.preventDefault();
         const item = filteredItems[activeIndex];
         if (!item) return;
 
@@ -226,14 +276,33 @@ class SectionFilterSearch {
       }
     };
 
-    window.addEventListener("scroll", syncPositionIfOpen, true);
-    window.addEventListener("resize", syncPositionIfOpen);
+    track(window, "scroll", syncPositionIfOpen, true);
+    track(window, "resize", syncPositionIfOpen);
 
-    doc.addEventListener("click", (event) => {
+    track(doc, "click", (event) => {
       const target = event.target as Node | null;
       if (!target || helper.contains(target) || results.contains(target)) return;
       closeResults();
     });
+
+    this.states.set(field, state);
+  }
+
+  private cleanupState(state: FieldState): void {
+    // Идемпотентная очистка: повторные вызовы ничего не делают.
+    if (state.listeners.length === 0 && !state.helper.isConnected && !state.results.isConnected) {
+      this.states.delete(state.field);
+      return;
+    }
+
+    for (const tracked of state.listeners) {
+      tracked.target.removeEventListener(tracked.type, tracked.listener, tracked.options);
+    }
+    state.listeners.length = 0;
+
+    state.results.remove();
+    state.helper.remove();
+    this.states.delete(state.field);
   }
 
   private parseItems(rawItems: string | null): SectionOptionItem[] {
@@ -382,11 +451,15 @@ class SectionFilterSearch {
   }
 
   private cleanup(): void {
+    for (const state of Array.from(this.states.values())) {
+      this.cleanupState(state);
+    }
+    this.states.clear();
+
     const doc = getDocument();
     if (!doc) return;
 
     doc.getElementById(this.styleId)?.remove();
-    doc.querySelectorAll(this.helperSelector).forEach((helper) => helper.remove());
   }
 }
 

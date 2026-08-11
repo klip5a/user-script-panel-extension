@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { debounce, getDocument } from "../../../../shared";
 import { ProductMassEditorApp } from "../ui/ProductMassEditorApp";
+import { isAbortError, LinkedOptionsController } from "./linkedOptions";
 import { resolveMultiValueSelection } from "./multiValueSelection";
 import {
   isSelectedEditableProductRow,
@@ -31,6 +32,8 @@ class ProductMassEditor {
   private fieldLinkedQueries = new Map<string, string>();
   private fieldLinkedSelectedValues = new Map<string, string>();
   private fieldLinkedLoading = new Set<string>();
+  private readonly linkedRequestTokens = new Map<string, number>();
+  private readonly linkedOptions = new LinkedOptionsController();
 
   private readonly PRODUCT_MASS_EDIT_BTN_ID = "product_mass_edit_btn";
   private readonly PRODUCT_MASS_EDIT_BTN_HOST_ID = "product_mass_edit_btn_host";
@@ -58,6 +61,7 @@ class ProductMassEditor {
     if (!this.enabled) return;
     this.enabled = false;
     this.observer?.disconnect();
+    this.linkedOptions.abortAll();
     this.removeProductMassEditButton();
     this.unmountUi();
   }
@@ -166,6 +170,9 @@ class ProductMassEditor {
 
   private unmountUi(): void {
     if (!this.uiHost) return;
+    // Отменяем все активные запросы связанных значений при закрытии/остановке.
+    this.linkedOptions.abortAll();
+    this.linkedRequestTokens.clear();
     render(null, this.uiHost);
     this.uiHost.remove();
     this.uiHost = null;
@@ -342,7 +349,11 @@ class ProductMassEditor {
       this.fieldLinkedLoading.add(draft.key);
       this.renderUi();
 
+      const token = (this.linkedRequestTokens.get(draft.key) ?? 0) + 1;
+      this.linkedRequestTokens.set(draft.key, token);
+
       void this.resolveLinkedFieldOptions(field).finally(() => {
+        if (this.linkedRequestTokens.get(draft.key) !== token) return;
         this.fieldLinkedLoading.delete(draft.key);
         this.renderUi();
       });
@@ -356,6 +367,7 @@ class ProductMassEditor {
     this.fieldLinkedQueries.delete(draftKey);
     this.fieldLinkedSelectedValues.delete(draftKey);
     this.fieldLinkedLoading.delete(draftKey);
+    this.linkedRequestTokens.delete(draftKey);
   }
 
   private collectProductActionFields(table: HTMLTableElement): ProductFieldDescriptor[] {
@@ -555,8 +567,9 @@ class ProductMassEditor {
       return this.linkedOptionsCache.get(field.searchUrl) ?? [];
     }
 
+    const handle = this.linkedOptions.startRequest(field.searchUrl);
     try {
-      const initialDoc = await this.fetchHtmlDocument(field.searchUrl);
+      const initialDoc = await this.linkedOptions.fetchHtml(field.searchUrl, handle.signal);
       const totalItems = this.readLinkedOptionsTotalCount(initialDoc);
       const initialOptions = this.extractLinkedOptions(initialDoc);
 
@@ -566,7 +579,7 @@ class ProductMassEditor {
           this.extractShowAllUrl(initialDoc, field.searchUrl) ?? this.buildShowAllUrl(field.searchUrl, field.searchUrl);
 
         if (fullListUrl) {
-          const fullDoc = await this.fetchHtmlDocument(fullListUrl);
+          const fullDoc = await this.linkedOptions.fetchHtml(fullListUrl, handle.signal);
           const fullOptions = this.extractLinkedOptions(fullDoc);
           if (fullOptions.length > options.length) {
             options = fullOptions;
@@ -574,19 +587,16 @@ class ProductMassEditor {
         }
       }
 
+      if (!this.linkedOptions.isCurrent(handle)) return [];
       this.linkedOptionsCache.set(field.searchUrl, options);
       return options;
     } catch (error) {
+      if (isAbortError(error)) return [];
       console.warn("[ProductMassEditor] linked options fetch failed", error);
       return [];
+    } finally {
+      this.linkedOptions.finishRequest(handle);
     }
-  }
-
-  private async fetchHtmlDocument(url: string): Promise<Document> {
-    const response = await fetch(url, { credentials: "same-origin" });
-    const html = await response.text();
-    const parser = new DOMParser();
-    return parser.parseFromString(html, "text/html");
   }
 
   private extractLinkedOptions(doc: Document): ProductFieldOption[] {

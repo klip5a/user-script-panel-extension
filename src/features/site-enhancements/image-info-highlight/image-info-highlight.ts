@@ -29,8 +29,24 @@ type ImageInfo = {
   sameAsset: boolean;
 };
 
+type TrackedListener = {
+  target: EventTarget;
+  type: string;
+  listener: EventListenerOrEventListenerObject;
+  options?: boolean | AddEventListenerOptions;
+};
+
+type TargetState = {
+  image: HTMLImageElement;
+  container: HTMLElement;
+  badge: HTMLElement;
+  listeners: TrackedListener[];
+  refresh: () => void;
+};
+
 class ImageInfoHighlight {
   private enabled = false;
+  private lifecycleGeneration = 0;
   private mutationObserver: MutationObserver | null = null;
   private intersectionObserver: IntersectionObserver | null = null;
   // Кэшируем метаданные по точному URL; null означает, что файл уже пробовали получить, но не смогли.
@@ -38,7 +54,8 @@ class ImageInfoHighlight {
   // Один URL может встретиться в нескольких карточках, поэтому параллельные запросы объединяем.
   private readonly pendingInfoRequests = new Map<string, Promise<void>>();
   // Динамические галереи могут менять URL уже обработанного img без замены самого элемента.
-  private readonly refreshCallbacks = new WeakMap<HTMLImageElement, () => void>();
+  private readonly targetStates = new WeakMap<HTMLImageElement, TargetState>();
+  private readonly trackedTargets = new Set<HTMLImageElement>();
 
   private pendingImages: HTMLImageElement[] = [];
   private scheduledBatchId: number | null = null;
@@ -84,38 +101,43 @@ class ImageInfoHighlight {
   start(): void {
     if (this.enabled) return;
     this.enabled = true;
+    const generation = ++this.lifecycleGeneration;
     // Стили добавляются один раз на документ, а бейджи уже создаются рядом с найденными картинками.
     this.injectStyles();
-    this.initObserver();
+    this.initObserver(generation);
   }
 
   stop(): void {
     if (!this.enabled) return;
     this.enabled = false;
+    // Старые async-завершения больше не смогут мутировать отключённый UI.
+    this.lifecycleGeneration += 1;
     // При выключении настройки возвращаем страницу в исходное состояние.
     this.mutationObserver?.disconnect();
     this.intersectionObserver?.disconnect();
-    
+
     if (this.scheduledBatchId !== null) {
       cancelIdleTask(this.scheduledBatchId);
       this.scheduledBatchId = null;
     }
     this.pendingImages = [];
-    
+
     this.cleanup();
   }
 
-  private initObserver(): void {
+  private initObserver(generation: number): void {
     const doc = getDocument();
     if (!doc?.body) return;
 
     // Инициализируем IntersectionObserver для отложенной загрузки и подсветки
     this.intersectionObserver = new IntersectionObserver((entries) => {
+      if (generation !== this.lifecycleGeneration || !this.enabled) return;
+
       let hasNew = false;
       for (const entry of entries) {
         if (entry.isIntersecting) {
           const image = entry.target as HTMLImageElement;
-          
+
           if (!image.closest(".image-info-highlight-wrap") && this.shouldEnhanceImage(image)) {
             this.intersectionObserver?.unobserve(image); // обрабатываем один раз при успешном захвате
             this.pendingImages.push(image);
@@ -124,7 +146,7 @@ class ImageInfoHighlight {
         }
       }
       if (hasNew) {
-        this.scheduleProcessBatch();
+        this.scheduleProcessBatch(generation);
       }
     }, {
       rootMargin: "200px", // начинаем обработку чуть заранее до появления на экране
@@ -139,7 +161,7 @@ class ImageInfoHighlight {
               const element = node as HTMLElement;
               // Проверяем сам элемент, если это img
               if (element.matches?.(this.IMAGE_SELECTOR)) {
-                 this.intersectionObserver?.observe(element);
+                this.intersectionObserver?.observe(element);
               }
               // Проверяем его потомков
               if (element.querySelectorAll) {
@@ -150,16 +172,29 @@ class ImageInfoHighlight {
               }
             }
           }
+          for (const node of mutation.removedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            const element = node as HTMLElement;
+            const images = new Set<HTMLImageElement>();
+            // Корневой IMG очищаем независимо от селектора: после отсоединения от
+            // ancestor-селекторов типа .catalog_block img matches() уже не сработает.
+            if (element.tagName === "IMG") {
+              images.add(element as HTMLImageElement);
+            }
+            // Потомков-картинок тоже собираем по тегу, а не по IMAGE_SELECTOR:
+            // cleanupTarget идемпотентен и безопасен для неотслеживаемых изображений.
+            element.querySelectorAll?.("img").forEach((img) => {
+              images.add(img as HTMLImageElement);
+            });
+            for (const image of images) {
+              this.cleanupTarget(image);
+            }
+          }
         } else if (mutation.type === "attributes") {
           const target = mutation.target as HTMLElement;
           if (target.tagName === "IMG" && target.matches?.(this.IMAGE_SELECTOR)) {
             const image = target as HTMLImageElement;
-            const refresh = this.refreshCallbacks.get(image);
-            if (refresh) {
-              refresh();
-            } else {
-              this.intersectionObserver?.observe(image);
-            }
+            this.handleImageAttributeChange(image);
           } else if (
             target.tagName === "A" ||
             target.matches?.(this.FULL_IMAGE_ATTRIBUTE_SELECTOR)
@@ -167,9 +202,7 @@ class ImageInfoHighlight {
             // Карусель может заменить href/data-full у существующего слайда.
             const images = target.querySelectorAll<HTMLImageElement>(this.IMAGE_SELECTOR);
             for (const image of images) {
-              const refresh = this.refreshCallbacks.get(image);
-              if (refresh) refresh();
-              else this.intersectionObserver?.observe(image);
+              this.handleImageAttributeChange(image);
             }
           }
         }
@@ -197,17 +230,27 @@ class ImageInfoHighlight {
     }
   }
 
-  private scheduleProcessBatch(): void {
+  private handleImageAttributeChange(image: HTMLImageElement): void {
+    if (!this.enabled) return;
+    const state = this.targetStates.get(image);
+    if (state) {
+      state.refresh();
+    } else {
+      this.intersectionObserver?.observe(image);
+    }
+  }
+
+  private scheduleProcessBatch(generation: number): void {
     if (!this.enabled || this.scheduledBatchId !== null || this.pendingImages.length === 0) return;
 
     this.scheduledBatchId = scheduleIdleTask((deadline) => {
       this.scheduledBatchId = null;
-      this.processImageBatch(deadline);
+      this.processImageBatch(deadline, generation);
     });
   }
 
-  private processImageBatch(deadline: IdleDeadlineLike): void {
-    if (!this.enabled) return;
+  private processImageBatch(deadline: IdleDeadlineLike, generation: number): void {
+    if (!this.enabled || generation !== this.lifecycleGeneration) return;
 
     let processedCount = 0;
 
@@ -218,17 +261,21 @@ class ImageInfoHighlight {
     ) {
       const image = this.pendingImages.shift();
       if (!image) continue;
+      // Удалённые из DOM картинки обрабатывать нельзя: cleanup мог не успеть снять их из очереди.
+      if (!image.isConnected) continue;
       if (image.closest(".image-info-highlight-wrap")) continue;
       if (!this.shouldEnhanceImage(image)) continue;
-      
-      this.enhanceImage(image);
+
+      this.enhanceImage(image, generation);
       processedCount += 1;
     }
 
-    this.scheduleProcessBatch();
+    this.scheduleProcessBatch(generation);
   }
 
   private shouldEnhanceImage(image: HTMLImageElement): boolean {
+    // Отключённые от DOM картинки не усиливаем.
+    if (!image.isConnected) return false;
     // Стикеры и мелкие декоративные изображения не относятся к товарным фото.
     if (image.closest(".detail-stickers-wrap")) return false;
     // Бейдж позиционируется относительно родителя картинки, поэтому родитель обязателен.
@@ -238,10 +285,12 @@ class ImageInfoHighlight {
     return Boolean(this.getFullImageUrl(image) || this.getSiteImageUrl(image));
   }
 
-  private enhanceImage(image: HTMLImageElement): void {
+  private enhanceImage(image: HTMLImageElement, generation: number): void {
     const doc = getDocument();
     const container = image.parentElement;
-    if (!doc || !container) return;
+    if (!doc || !container || !image.isConnected) return;
+
+    if (generation !== this.lifecycleGeneration || !this.enabled) return;
 
     // Не оборачиваем img новым DOM-узлом, чтобы не ломать Swiper/Fancybox и сетку карточек.
     container.classList.add("image-info-highlight-wrap");
@@ -251,9 +300,33 @@ class ImageInfoHighlight {
     badge.className = "image-info-highlight-badge";
     image.insertAdjacentElement("afterend", badge);
 
+    const state: TargetState = {
+      image,
+      container,
+      badge,
+      listeners: [],
+      refresh: () => {},
+    };
+    const track = (
+      target: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ): void => {
+      target.addEventListener(type, listener, options);
+      state.listeners.push({ target, type, listener, options });
+    };
+
     let showDetails = false;
 
     const syncBadge = () => {
+      if (
+        generation !== this.lifecycleGeneration ||
+        !this.enabled ||
+        !badge.isConnected
+      ) {
+        return;
+      }
       // syncBadge переиспользуется после lazyload и после загрузки метаданных Full/Site.
       const info = this.getImageInfo(image);
       badge.textContent = this.formatBadgeText(image, info, showDetails);
@@ -261,6 +334,7 @@ class ImageInfoHighlight {
     };
 
     const refreshInfo = () => {
+      if (generation !== this.lifecycleGeneration || !this.enabled) return;
       syncBadge();
       void Promise.all([
         this.loadImageInfo(this.getFullImageUrl(image)),
@@ -268,21 +342,44 @@ class ImageInfoHighlight {
       ]).then(syncBadge);
     };
 
-    this.refreshCallbacks.set(image, refreshInfo);
+    state.refresh = refreshInfo;
+    this.targetStates.set(image, state);
+    this.trackedTargets.add(image);
 
     // После lazyload src/currentSrc могут поменяться, поэтому обновляем подпись.
-    image.addEventListener("load", refreshInfo, { passive: true });
-    container.addEventListener("mouseenter", () => {
+    track(image, "load", refreshInfo, { passive: true });
+    track(container, "mouseenter", () => {
       showDetails = true;
       refreshInfo();
     });
-    container.addEventListener("mouseleave", () => {
+    track(container, "mouseleave", () => {
       showDetails = false;
       syncBadge();
     });
 
     // Оба точных размера нужны до наведения; Site обычно уже доступен в HTTP-кэше страницы.
     refreshInfo();
+  }
+
+  private cleanupTarget(image: HTMLImageElement): void {
+    // Всегда снимаем картинку с IntersectionObserver, даже если она ещё не была усилена.
+    this.intersectionObserver?.unobserve(image);
+    // Удаляем ВСЕ вхождения картинки из очереди отложенной обработки.
+    if (this.pendingImages.length > 0) {
+      this.pendingImages = this.pendingImages.filter((pending) => pending !== image);
+    }
+
+    const state = this.targetStates.get(image);
+    this.targetStates.delete(image);
+    this.trackedTargets.delete(image);
+
+    if (!state) return;
+    for (const tracked of state.listeners) {
+      tracked.target.removeEventListener(tracked.type, tracked.listener, tracked.options);
+    }
+    state.listeners.length = 0;
+    state.badge.remove();
+    state.container.classList.remove("image-info-highlight-wrap");
   }
 
   private getImageInfo(image: HTMLImageElement): ImageInfo {
@@ -554,12 +651,18 @@ class ImageInfoHighlight {
   }
 
   private cleanup(): void {
+    // Снимаем все слушатели и очищаем refresh-колбэки по каждому обработанному target.
+    for (const image of Array.from(this.trackedTargets)) {
+      this.cleanupTarget(image);
+    }
+    this.trackedTargets.clear();
+
     const doc = getDocument();
     if (!doc) return;
 
     doc.getElementById("image-info-highlight-styles")?.remove();
 
-    // Убираем только свои классы и бейджи, не трогая исходную DOM-структуру сайта.
+    // Страховка: убираем только свои классы и бейджи, не трогая исходную DOM-структуру сайта.
     doc.querySelectorAll<HTMLElement>(".image-info-highlight-wrap").forEach((wrapper) => {
       wrapper.classList.remove("image-info-highlight-wrap");
     });

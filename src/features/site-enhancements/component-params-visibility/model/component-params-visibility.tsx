@@ -6,6 +6,7 @@ import type {
   ComponentParamsGroup,
   ComponentParamsMatrixColumn,
   ComponentParamsMatrixRow,
+  ComponentParamsRow,
 } from "./types";
 
 class ComponentParamsVisibility {
@@ -541,10 +542,6 @@ class ComponentParamsVisibility {
   }
 
   private applySavedVisibility(_context: ComponentParamsDialogContext): void {
-    // В матричном режиме настройки пока только читаются из Bitrix и не изменяют DOM таблицы.
-  }
-
-  private applyVisibilityToDialog(_context: ComponentParamsDialogContext, _visibleKeys: Set<string>): void {
     // В матричном режиме настройки пока только читаются из Bitrix и не изменяют DOM таблицы.
   }
 }

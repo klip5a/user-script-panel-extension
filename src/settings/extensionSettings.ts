@@ -2,6 +2,7 @@ export type ExtensionSettingKey =
   | "sortHighlightEnabled"
   | "filterSortCheckEnabled"
   | "imageInfoHighlightEnabled"
+  | "catalogEmptyPropertiesHighlightEnabled"
   | "catalogEmptyPropertiesPanelVisible"
   | "hideSocialWidget"
   | "hideBitrixWidgets"
@@ -13,6 +14,7 @@ export type ExtensionSettings = {
   sortHighlightEnabled: boolean;
   filterSortCheckEnabled: boolean;
   imageInfoHighlightEnabled: boolean;
+  catalogEmptyPropertiesHighlightEnabled: boolean;
   catalogEmptyPropertiesPanelVisible: boolean;
   hideSocialWidget: boolean;
   hideBitrixWidgets: boolean;
@@ -35,6 +37,7 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   sortHighlightEnabled: false,
   filterSortCheckEnabled: false,
   imageInfoHighlightEnabled: false,
+  catalogEmptyPropertiesHighlightEnabled: false,
   catalogEmptyPropertiesPanelVisible: false,
   hideSocialWidget: false,
   hideBitrixWidgets: false,
@@ -42,6 +45,51 @@ export const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
   hideCallbackButtons: false,
   hideInvolveoWidget: false
 };
+
+// Эффективная нормализация прочитанных настроек: повреждённые значения игнорируются,
+// а legacy-инвариант panelVisible=true всегда включает подсветку пустых свойств.
+export function normalizeExtensionSettings(value: unknown): ExtensionSettings {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  const settings: ExtensionSettings = { ...DEFAULT_EXTENSION_SETTINGS };
+
+  (Object.keys(DEFAULT_EXTENSION_SETTINGS) as ExtensionSettingKey[]).forEach((key) => {
+    if (typeof candidate[key] === "boolean") {
+      settings[key] = candidate[key] as boolean;
+    }
+  });
+
+  if (settings.catalogEmptyPropertiesPanelVisible) {
+    settings.catalogEmptyPropertiesHighlightEnabled = true;
+  }
+
+  return settings;
+}
+
+// Нормализация записываемого патча: связанные флаги панели/подсветки меняются атомарно
+// в одном наборе ключей, а невалидные значения отбрасываются.
+export function normalizeSettingsPatch(
+  patch: Partial<ExtensionSettings>,
+): Partial<ExtensionSettings> {
+  const normalized: Partial<ExtensionSettings> = {};
+
+  (Object.keys(patch) as ExtensionSettingKey[]).forEach((key) => {
+    if (typeof patch[key] === "boolean") {
+      normalized[key] = patch[key];
+    }
+  });
+
+  if (normalized.catalogEmptyPropertiesPanelVisible === true) {
+    normalized.catalogEmptyPropertiesHighlightEnabled = true;
+  }
+  if (normalized.catalogEmptyPropertiesHighlightEnabled === false) {
+    normalized.catalogEmptyPropertiesPanelVisible = false;
+  }
+
+  return normalized;
+}
 
 export const ENHANCEMENT_SETTINGS: SettingItem[] = [
   {
@@ -60,9 +108,14 @@ export const ENHANCEMENT_SETTINGS: SettingItem[] = [
     description: "Показывает размер полного изображения в каталоге и карточке товара, вес файла догружает при наведении."
   },
   {
+    key: "catalogEmptyPropertiesHighlightEnabled",
+    title: "Подсветка пустых свойств",
+    description: "Находит и подсвечивает незаполненные характеристики в таблице каталога."
+  },
+  {
     key: "catalogEmptyPropertiesPanelVisible",
-    title: "Панель пустых свойств",
-    description: "Показывает справа навигацию по незаполненным характеристикам таблицы."
+    title: "Мини-панель пустых свойств",
+    description: "Показывает навигацию по найденным пропускам и автоматически включает проверку."
   }
 ];
 
